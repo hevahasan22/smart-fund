@@ -37,3 +37,4 @@ const investoreModel=mongoose.model('investore',investoreSchema)
 module.exports={
   investoreModel
 }
+//hgfjf
