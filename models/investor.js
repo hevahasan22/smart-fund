@@ -1,6 +1,6 @@
 const mongoose=require('mongoose');
 const joi=require('joi')
-const investoreSchema=new mongoose.Schema(
+const investorSchema=new mongoose.Schema(
     {
       name:
       {
@@ -32,9 +32,9 @@ const investoreSchema=new mongoose.Schema(
     }
 )
 
-const investoreModel=mongoose.model('investore',investoreSchema)
+const investorModel=mongoose.model('investor',investorSchema)
 
 module.exports={
-  investoreModel
+  investorModel
 }
 //hgfjf
