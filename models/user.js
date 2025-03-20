@@ -70,6 +70,12 @@ const userSchema=new mongoose.Schema(
        {
         type:String,
         requires:true
+       },
+       contract:
+       {
+        type:mongoose.Schema.Types.ObjectId,
+        ref:'contract',
+        required:true
        }
     },
     {
