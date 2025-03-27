@@ -9,12 +9,14 @@ app.use('/api', router);
 
 //Routers
 app.use("/api/register",require('./routes/auth'))
-app.use('/',require('./routes/auth'))
+app.use("/",require('./routes/auth'))
+app.use("/api/upload",require('./routes/upload'))
 
 // Error handling middleware
 app.use((err, req, res, next) => {
     console.error(err.stack);
-    res.status(500).send('Something broke!');
+    res.status(500).json({ success: false, message: 'Something went wrong!' });
+
 }); 
 
 
