@@ -5,6 +5,7 @@ const bcrypt=require('bcryptjs')
 const asyncHandler = require('express-async-handler');
 const router=express.Router();
 const {validateRegisterUser, userModel}=require('../models/user')
+const {checkUserExists,validateCredentials,isAuthenticated}=require('../middleware/auth')
 const mongoose=require('mongoose')
 
 
@@ -16,8 +17,7 @@ router.post('/api/register',asyncHandler(async(req,res)=>{
     }
     const userExists=await userModel.findOne({email:req.body.email})
     if(userExists){
-        res.status(400)
-        throw new Error('User already exists')
+        res.status(400).json({message:'User already exists'})
     }
 
     const saltRounds=12;
@@ -27,7 +27,7 @@ router.post('/api/register',asyncHandler(async(req,res)=>{
         userFirstName:req.body.userFirstName,
         userLastName:req.body.userLastName,
         password:hashedPassword,
-        phoneNumber:req.body.phoneNumber
+        phoneNumber:req.body.phoneNumber, 
     })
     const result= await user.save();
 
@@ -42,8 +42,6 @@ router.post('/api/register',asyncHandler(async(req,res)=>{
     })
 }))
 
-router.get('/',(req,res)=>{
-    res.send('hello')
-})
+
 
 module.exports=router;

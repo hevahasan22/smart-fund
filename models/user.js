@@ -51,31 +51,30 @@ const userSchema=new mongoose.Schema(
          type:String,
          required:false
        },
-       isAdmin:
-       {
-         type:Boolean,
-         default:false
-       },
+       role: {
+        type: String,
+        enum: ['user', 'admin'],
+        default: 'user'
+      },
        statues:
        {
         type:Boolean,
-        required:true,
+        required:false,
        },
        accountNumber:
        {
         type:Number,
-        required:true
+        required:false
        },
        income:
        {
         type:String,
-        requires:true
+        requires:false
        },
        contract:
        {
         type:mongoose.Schema.Types.ObjectId,
-        ref:'contract',
-        required:true
+        ref:'contract'
        }
     },
     {
