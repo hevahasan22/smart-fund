@@ -103,7 +103,8 @@ function validateLoginUser(obj){
       email:joi.string().trim().min(4).max(100).required().email(),
       password:joi.string().trim().min(4).max(20).required()
     }
-  )
+  );
+  return schema.validate(obj)
 }
 
 const userModel=mongoose.model('user',userSchema)

@@ -1,11 +1,9 @@
 const express=require('express')
 const bcrypt=require('bcryptjs')
-// const app=express();
-// app.use(express.json());
 const asyncHandler = require('express-async-handler');
 const router=express.Router();
-const {validateRegisterUser, userModel}=require('../models/user')
-const {checkUserExists,validateCredentials,isAuthenticated}=require('../middleware/auth')
+const {validateRegisterUser, userModel,validateLoginUser}=require('../models/user')
+const {validateCredentials,isAuthenticated}=require('../middleware/auth')
 const mongoose=require('mongoose')
 
 
@@ -43,5 +41,19 @@ router.post('/api/register',asyncHandler(async(req,res)=>{
 }))
 
 
-
+router.post('/api/login',asyncHandler(async(req,res)=>{
+    const {error}=validateLoginUser(req.body);
+    if(error){
+        return res.status(400).json({message:error.details[0].message});
+    }
+     user=await userModel.findOne({email:req.body.email})
+     if(!user){
+        return res.status(400).json({message:"invalid email or password"})
+     }
+     const correctPassword=await bcrypt.compare(req.body.password,user.password)
+     if(!correctPassword){
+        return res.status(400).json({message: "invalid email or password"});
+    }
+    res.status(200).json({message:"welcome back "})
+}))
 module.exports=router;

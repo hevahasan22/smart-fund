@@ -11,6 +11,7 @@ app.use('/api', router);
 //Routers
 app.use("/api/register",require('./routes/auth'))
 app.use("/",require('./routes/auth'))
+app.use("api/login",require('./routes/auth'))
 app.use("/api/upload",require('./routes/upload'))
 
 // Error handling middleware

@@ -5,24 +5,7 @@ const user = require ('../models/user')
  * - Validates user credentials
  */
 
-// Check if user exists by email
-exports.checkUserExists = async (req, res, next) => {
-    try {
-      const { email } = req.body;
-      
-      const user = await user.findOne({ email });
-      
-      if (!user) {
-        return res.status(404).json({ message: 'User not found with this email' });
-      }
-      
-      // Attach user to request for later use
-      req.user = user;
-      next();
-    } catch (error) {
-      res.status(500).json({ message: 'Server error', error: error.message });
-    }
-  };
+
 
   //validate user password
   exports.validateCredentials = async (req, res, next) => {
