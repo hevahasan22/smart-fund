@@ -4,15 +4,18 @@ const app=express();
 app.use(express.json())
 const router=express.Router();
 const { default: mongoose } = require('mongoose');
-const session=require('express-session')
+
+const auth = require('./middleware/auth');
+
+//router requirment
+const authRoutes =require('./routes/auth');
+const uploadRouter=require('./routes/upload')
 app.use('/api', router);
 
 
 //Routers
-app.use("/api/register",require('./routes/auth'))
-app.use("/",require('./routes/auth'))
-app.use("api/login",require('./routes/auth'))
-app.use("/api/upload",require('./routes/upload'))
+app.use('/api',authRoutes);
+app.use('/api/upload',uploadRouter)
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -21,12 +24,6 @@ app.use((err, req, res, next) => {
 
 }); 
 app.use(express.urlencoded({ extended: true }));
-app.use(session({
-    secret: 'your-secret-key',
-    resave: false,
-    saveUninitialized: false,
-    cookie: { maxAge: 24 * 60 * 60 * 1000 } // 24 hours
-  }));
 
 
 //mongo connecter
