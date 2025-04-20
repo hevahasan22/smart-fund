@@ -1,7 +1,7 @@
 const express=require('express')
 const router =express.Router()
-const uploadController=require('../controllers/upload')
+const upload = require('../middleware/multer');
+const { uploadAfil } = require('../controllers/upload');
 
-router.post('./upload',uploadController.uploadAfil)
-
-module.exports=router
+router.post('/upload', upload.single('file'), uploadAfil);
+module.exports = router;

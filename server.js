@@ -15,7 +15,7 @@ app.use('/api', router);
 
 //Routers
 app.use('/api',authRoutes);
-app.use('/api/upload',uploadRouter)
+app.use('/api',uploadRouter)
 
 // Error handling middleware
 app.use((err, req, res, next) => {
