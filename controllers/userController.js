@@ -24,6 +24,7 @@ exports.register = async (req, res) => {
            email:req.body.email,
            userFirstName:req.body.userFirstName,
            userLastName:req.body.userLastName,
+           employmentStatus:req.body.employmentStatus,
            password:hashedPassword, 
        })
        const result= await user.save();
@@ -58,4 +59,9 @@ exports.login = async (req, res) => {
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
+};
+exports.getUser = async (req, res) => {
+  const user = await User.findOne({ userID: req.params.userID });
+  if (!user) return res.status(404).send('User not found');
+  res.send(user);
 };

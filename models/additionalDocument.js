@@ -10,7 +10,7 @@ const additionalDocumentSchema=new mongoos.Schema({
     },
     contract:
     {
-        type:mongoos.Schema.type.ObjectId,
+        type:mongoos.Schema.Types.ObjectId,
         ref:'contract',
         required:true
     },
@@ -32,7 +32,7 @@ const additionalDocumentSchema=new mongoos.Schema({
     }
 })
 
-const additionalDocumentMode=mongoos.model('additionalDocument',additionalDocumentSchema)
+const additionalDocumentModel=mongoos.model('additionalDocument',additionalDocumentSchema)
 module.exports={
-    additionalDocumentMode
+    additionalDocumentModel
 }

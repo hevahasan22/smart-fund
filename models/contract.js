@@ -28,12 +28,23 @@ const contractSchema=new mongoose.Schema({
         type:mongoose.Schema.Types.ObjectId,
         ref:'sponser',
         required:true
+    },
+    accoountNumber:
+    {
+      type:Number
+    },
+    userStatues:
+    {
+      type:Boolean
     }
   },
   {
     timestamps:true
   }
 )
+
+
+
 const contractModel=mongoose.model('contract',contractSchema)
 module.exports={
   contractModel

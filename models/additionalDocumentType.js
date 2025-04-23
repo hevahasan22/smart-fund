@@ -1,6 +1,6 @@
 const mongoose=require('mongoose')
 const joi=require('joi')
-const additionalDocTypeSchema=mongoose.Schema({
+const additionalDocumentTypeSchema=mongoose.Schema({
     documentName:
     {
        type:String,
@@ -18,3 +18,7 @@ const additionalDocTypeSchema=mongoose.Schema({
         required:true
     }
 })
+
+module.exports = {
+    AdditionalDocumentType: mongoose.model('AdditionalDocumentType', additionalDocumentTypeSchema)
+  };

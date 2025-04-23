@@ -4,7 +4,7 @@ const Joi = require('joi');
 // User Schema
 const userSchema = new mongoose.Schema(
   {
-    userFirstName: {
+    userFirstName:{
       type: String,
       required: true,
       trim: true,
@@ -12,7 +12,8 @@ const userSchema = new mongoose.Schema(
       minlength: 3,
       maxlength: 20,
     },
-    userLastName: {
+    userLastName: 
+    {
       type: String,
       required: true,
       trim: true,
@@ -20,7 +21,8 @@ const userSchema = new mongoose.Schema(
       minlength: 3,
       maxlength: 20,
     },
-    email: {
+    email: 
+    {
       type: String,
       required: true,
       trim: true,
@@ -28,33 +30,45 @@ const userSchema = new mongoose.Schema(
       minlength: 4,
       maxlength: 100,
     },
-    password: {
+    password: 
+    {
       type: String,
       required: true,
       minlength: 8,
     },
-    phoneNumber: {
+    phoneNumber: 
+    {
       type: Number,
       required: false,
     },
-    DateOfBirth: {
+    DateOfBirth: 
+    {
       type: Date,
       required: false,
     },
-    address: {
+    address: 
+    {
       type: String,
       required: false,
     },
-    role: {
+    role: 
+    {
       type: String,
       enum: ['user', 'admin'],
       default: 'user',
     },
-    contract: {
+    employmentStatus: 
+    { 
+      type: String,
+      enum: ['employed', 'self-employed', 'unemployed'],
+    },
+    contract: 
+    {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'contract',
     },
-    createdAt: {
+    createdAt: 
+    {
       type: Date,
       default: Date.now,
     },
