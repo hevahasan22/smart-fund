@@ -1,15 +1,15 @@
 const mongoose=require('mongoose')
-const joi=require('joi')
+const Joi=require('joi')
 const additionalDocumentTypeSchema=mongoose.Schema({
     documentName:
     {
        type:String,
        trim:true
     },
-    loanTerm:
+    LoanType:
     {
         type:mongoose.Schema.Types.ObjectId,
-        ref:'loanTerm',
+        ref:'LoanType',
         required:true
     },
     isRequred:
@@ -18,7 +18,19 @@ const additionalDocumentTypeSchema=mongoose.Schema({
         required:true
     }
 })
+const additionalDocumentTypeValidation = Joi.object({
+    documentName: Joi.string().required(),
+    isRequired: Joi.boolean().required(),
+  });
 
+  const additionalDocumentTypeUpdateValidation = Joi.object({
+    documentName: Joi.string().required(),
+    isRequired: Joi.boolean().required(),
+  });
+  
+const additionalDocumentTypeModel=mongoose.model('additionalDocumentType',additionalDocumentTypeSchema)
 module.exports = {
-    AdditionalDocumentType: mongoose.model('AdditionalDocumentType', additionalDocumentTypeSchema)
+  additionalDocumentTypeModel,
+  additionalDocumentTypeValidation,
+  additionalDocumentTypeUpdateValidation
   };

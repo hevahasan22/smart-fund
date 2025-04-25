@@ -1,5 +1,5 @@
 const cloudinary=require('cloudinary');
-const { ref } = require('joi');
+const Joi = require('joi');
 const mongoos=require('mongoose');
 const additionalDocumentSchema=new mongoos.Schema({
     typeID:
@@ -20,19 +20,28 @@ const additionalDocumentSchema=new mongoos.Schema({
         {
             type:String,
             required:true
-        },
-        fileType:
-        {
-            type:String
         }
     },
     uploadedAt:
     {
         type:Date
     }
-})
+ },{timestamps:true}
+)
+
+const additionalDocumentValidation = Joi.object({
+    documentFile: Joi.string().required(),
+    uploadedAt: Joi.date()
+  });
+
+const additionalDocumentUpdateValidation = Joi.object({
+    documentFile: Joi.string().required(),
+    uploadedAt: Joi.date()
+  });
 
 const additionalDocumentModel=mongoos.model('additionalDocument',additionalDocumentSchema)
 module.exports={
-    additionalDocumentModel
+    additionalDocumentModel,
+    additionalDocumentValidation,
+    additionalDocumentUpdateValidation
 }

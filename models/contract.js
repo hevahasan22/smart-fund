@@ -1,5 +1,5 @@
 const mongoose= require('mongoose')
-const joi=require('joi')
+const Joi=require('joi')
 const contractSchema=new mongoose.Schema({
     statues:
     {
@@ -28,24 +28,25 @@ const contractSchema=new mongoose.Schema({
         type:mongoose.Schema.Types.ObjectId,
         ref:'sponser',
         required:true
-    },
-    accoountNumber:
-    {
-      type:Number
-    },
-    userStatues:
-    {
-      type:Boolean
-    }
-  },
-  {
-    timestamps:true
-  }
+    },  
+  },{timestamps:true}
 )
+ 
 
+const contractValidation= Joi.object({
+    status: Joi.string().valid('appproved','not approved').required(),
+    dateOfCreate: Joi.date().required()
+  });
 
+  const contractUpdateValidation = Joi.object({
+    status: Joi.string().valid('appproved','not approved').required(),
+    dateOfCreate: Joi.date().required()
+  });
 
 const contractModel=mongoose.model('contract',contractSchema)
+
 module.exports={
-  contractModel
+  contractModel,
+  contractValidation,
+  contractUpdateValidation
 }
