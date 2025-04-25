@@ -6,10 +6,10 @@ const additionalDocumentTypeSchema=mongoose.Schema({
        type:String,
        trim:true
     },
-    LoanType:
+    TypeTerm:
     {
         type:mongoose.Schema.Types.ObjectId,
-        ref:'LoanType',
+        ref:'TypeTerm',
         required:true
     },
     isRequred:
