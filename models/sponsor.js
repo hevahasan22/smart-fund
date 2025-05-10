@@ -1,6 +1,6 @@
 const mongoose=require('mongoose')
-const joi=require('joi')
-const sponserSchema=new mongoose.Schema(
+const Joi=require('joi')
+const sponsorSchema=new mongoose.Schema(
     {
         fullName:
         {
@@ -49,7 +49,17 @@ const sponserSchema=new mongoose.Schema(
     }
 )
 
-const sponserModel=mongoose.model('sponser',sponserSchema)
+const sponsorValidationSchema = Joi.object({
+  fullName: Joi.string().trim().required(),
+  email: Joi.string().email().required(),
+  phoneNumber: Joi.string().pattern(/^\+?[\d\s-]{10,}$/).required(),
+  relationshipWithUser: Joi.string(),
+  income: Joi.number().min(0).required(),
+  status: Joi.string().valid('active', 'inactive', 'pending')
+});
+
+const sponsorModel=mongoose.model('sponsor',sponsorSchema)
 module.exports={
-  sponserModel
+  sponsorModel,
+  validateSponsor: (data) => sponsorValidationSchema.validate(data)
 }
