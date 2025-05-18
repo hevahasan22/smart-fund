@@ -72,7 +72,21 @@ const userSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    isVerified: 
+    { 
+      type: Boolean,
+       default: false 
+    }, // New field for email verification
+   verificationCode: 
+   { 
+    type: String
+   }, // Temporary code for 2FA
+   verificationCodeExpires:
+   { 
+    type: Date
+   }, // Code expiration time
   },
+  
   {
     timestamps: true,
   }
