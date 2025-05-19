@@ -4,7 +4,7 @@ const Joi = require('joi');
 // User Schema
 const userSchema = new mongoose.Schema(
   {
-    userFirstName:{
+    userFirstName: {
       type: String,
       required: true,
       trim: true,
@@ -12,8 +12,7 @@ const userSchema = new mongoose.Schema(
       minlength: 3,
       maxlength: 20,
     },
-    userLastName: 
-    {
+    userLastName: {
       type: String,
       required: true,
       trim: true,
@@ -21,8 +20,7 @@ const userSchema = new mongoose.Schema(
       minlength: 3,
       maxlength: 20,
     },
-    email: 
-    {
+    email: {
       type: String,
       required: true,
       trim: true,
@@ -30,63 +28,51 @@ const userSchema = new mongoose.Schema(
       minlength: 4,
       maxlength: 100,
     },
-    password: 
-    {
+    password: {
       type: String,
       required: true,
       minlength: 8,
     },
-    phoneNumber: 
-    {
+    phoneNumber: {
       type: Number,
       required: false,
     },
-    DateOfBirth: 
-    {
+    DateOfBirth: {
       type: Date,
       required: false,
     },
-    address: 
-    {
+    address: {
       type: String,
       required: false,
     },
-    role: 
-    {
+    role: {
       type: String,
       enum: ['user', 'admin'],
       default: 'user',
     },
-    employmentStatus: 
-    { 
+    employmentStatus: {
       type: String,
       enum: ['employed', 'self-employed', 'unemployed'],
     },
-    contract: 
-    {
+    contract: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'contract',
     },
-    createdAt: 
-    {
+    createdAt: {
       type: Date,
       default: Date.now,
     },
-    isVerified: 
-    { 
+    isVerified: {
       type: Boolean,
-       default: false 
-    }, // New field for email verification
-   verificationCode: 
-   { 
-    type: String
-   }, // Temporary code for 2FA
-   verificationCodeExpires:
-   { 
-    type: Date
-   }, // Code expiration time
+      default: false,
+    },
+    verificationCode: {
+      type: String,
+    },
+    verificationCodeExpires: {
+      type: Date,
+    },
   },
-  
   {
     timestamps: true,
   }
@@ -115,6 +101,25 @@ function validateLoginUser(obj) {
   return schema.validate(obj);
 }
 
+// Validate Verify User
+function validateVerifyUser(obj) {
+  const schema = Joi.object({
+    email: Joi.string().trim().min(4).max(100).required().email(),
+    code: Joi.string().length(6).required(),
+  });
+
+  return schema.validate(obj);
+}
+
+// Validate Resend OTP
+function validateResendOtp(obj) {
+  const schema = Joi.object({
+    email: Joi.string().trim().min(4).max(100).required().email(),
+  });
+
+  return schema.validate(obj);
+}
+
 // Model
 const userModel = mongoose.model('user', userSchema);
 
@@ -123,4 +128,6 @@ module.exports = {
   userModel,
   validateRegisterUser,
   validateLoginUser,
+  validateVerifyUser,
+  validateResendOtp, // Added
 };
