@@ -1,5 +1,5 @@
 const mongoose= require('mongoose')
-const joi=require('joi')
+const Joi=require('joi')
 const typetermSchema=new mongoose.Schema({
     loanType:
     {
@@ -14,6 +14,7 @@ const typetermSchema=new mongoose.Schema({
         required:true
     }   
 })
+
 
 const typetermModel=mongoose.model('typeterm',typetermSchema)
 

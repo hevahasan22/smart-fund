@@ -1,5 +1,5 @@
 const mongoose=require('mongoose');
-const joi=require('joi')
+const Joi=require('joi')
 const loanTermSchema=new mongoose.Schema({
     type:{
         type:String,
@@ -21,7 +21,23 @@ const loanTermSchema=new mongoose.Schema({
     },
 })
 
+
+const loanTermValidation = Joi.object({
+    type: Joi.string().required(),
+    maxTerm: Joi.number().min(0).required(),
+    minTerm: Joi.number().min(0).required()
+  });
+
+  const loanTermUpdateValidation = Joi.object({
+    type: Joi.string().required(),
+    maxTerm: Joi.number().min(0).required(),
+    minTerm: Joi.number().min(0).required()
+  });
+
+  
 const loanTermModel=mongoose.model('loanTerm',loanTermSchema)
 module.exports={
-  loanTermModel
+  loanTermModel,
+  loanTermValidation,
+  loanTermUpdateValidation
 }
