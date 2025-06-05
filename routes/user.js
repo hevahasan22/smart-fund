@@ -14,5 +14,6 @@ router.post('/login', userController.login);
 router.post('/verify', userController.verifyEmail);
 router.post('/resend-otp',userController.resendOtp)
 router.get('/:userId', userController.getUser);
+router.get('/',userController.getAllUsers)
 
 module.exports = router;
