@@ -4,33 +4,21 @@ const additionalDocumentTypeSchema=mongoose.Schema({
     documentName:
     {
        type:String,
-       trim:true
+       required: true
     },
-    TypeTerm:
+    typeTermID:
     {
         type:mongoose.Schema.Types.ObjectId,
-        ref:'TypeTerm',
+        ref:'typeterm',
         required:true
     },
     isRequred:
     {
         type:Boolean,
-        required:true
+        default:true
     }
 })
-const additionalDocumentTypeValidation = Joi.object({
-    documentName: Joi.string().required(),
-    isRequired: Joi.boolean().required(),
-  });
-
-  const additionalDocumentTypeUpdateValidation = Joi.object({
-    documentName: Joi.string().required(),
-    isRequired: Joi.boolean().required(),
-  });
-  
 const additionalDocumentTypeModel=mongoose.model('additionalDocumentType',additionalDocumentTypeSchema)
 module.exports = {
-  additionalDocumentTypeModel,
-  additionalDocumentTypeValidation,
-  additionalDocumentTypeUpdateValidation
+  additionalDocumentTypeModel
   };

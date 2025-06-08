@@ -1,5 +1,4 @@
 const { Contract, validateContract } = require('../models/contract');
-const { Sponsor } = require('../models/sponsor');
 const { AdditionalDocument } = require('../models/additionalDocument');
 const { Loan } = require('../models/loan');
 const { Payment } = require('../models/payment');

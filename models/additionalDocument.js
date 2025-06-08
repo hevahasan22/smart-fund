@@ -8,7 +8,7 @@ const additionalDocumentSchema=new mongoos.Schema({
         ref:'additionalDocumentType',
         required:true
     },
-    contract:
+    contractID:
     {
         type:mongoos.Schema.Types.ObjectId,
         ref:'contract',
@@ -24,24 +24,45 @@ const additionalDocumentSchema=new mongoos.Schema({
     },
     uploadedAt:
     {
-        type:Date
-    }
+        type:Date,
+        default: Date.now
+    },
+    status: {
+        type: String,
+        enum: ['pending', 'approved', 'rejected'],
+        default: 'pending'
+    },
+    rejectionReason: String
  },{timestamps:true}
 )
 
-const additionalDocumentValidation = Joi.object({
-    documentFile: Joi.string().required(),
-    uploadedAt: Joi.date()
-  });
+// Document validation middleware
+additionalDocumentSchema.pre('save', async function(next) {
+  const docType = await mongoose.model('AdditionalDocumentType').findById(this.typeID);
+  const contract = await mongoose.model('Contract').findById(this.contractID)
+    .populate({
+      path: 'loanID',
+      populate: {
+        path: 'typeTermID',
+        populate: 'loanTypeID'
+      }
+    });
+  
+  // 1. Verify document matches loan type-term
+  if (!contract.loanID.typeTermID._id.equals(docType.typeTermID)) {
+    throw new Error('Document type does not match loan type-term combination');
+  }
+  
+  // 2. Check if file URL is provided
+  if (!this.documentFile) {
+    throw new Error('Document file is required');
+  }
+  
+  next();
+});
 
-const additionalDocumentUpdateValidation = Joi.object({
-    documentFile: Joi.string().required(),
-    uploadedAt: Joi.date()
-  });
+const additionalDocumentModel=mongoos.model('additionalDocument',additionalDocumentSchema);
 
-const additionalDocumentModel=mongoos.model('additionalDocument',additionalDocumentSchema)
 module.exports={
-    additionalDocumentModel,
-    additionalDocumentValidation,
-    additionalDocumentUpdateValidation
+  additionalDocumentModel
 }

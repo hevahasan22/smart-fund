@@ -11,45 +11,36 @@ const loanTypeSchema=new mongoose.Schema({
     },
     interestRate:{
         type:Number,
-        trim:true,
         required:true,
+        min: [0, 'Interest rate cannot be negative']
     },
     maxAmount:{
         type:Number,
-        trim:true,
-        required:true
+        required:true,
+        validate: {
+          validator: function(v) {
+            return v > this.minAmount;
+          },
+          message: 'Max amount must be greater than min amount'
+        }
     },
     minAmount:{
         type:Number,
-        trim:true,
         required:true,
+        min: [0, 'Minimum amount cannot be negative']
     },
     description:{
         type:String,
+    },
+    priority: {
+        type: Number,
+        default: 3,
+        min: [1, 'Priority must be at least 1 (highest)']
     }
   },{timestamps:true}
 )
 
-
-const loanTypeValidation = Joi.object({
-    loanName: Joi.string().required(),
-    interestRate: Joi.number().min(0).required(),
-    maxAmount: Joi.number().min(0).required(),
-    minAmount: Joi.number().min(0).required(),
-    description: Joi.string()
-  });
-
-  const loanTypeUpdateValidation = Joi.object({
-    loanName: Joi.string().required(),
-    interestRate: Joi.number().min(0).required(),
-    maxAmount: Joi.number().min(0).required(),
-    minAmount: Joi.number().min(0).required(),
-    description: Joi.string()
-  });
-
 const loanTypeModel=mongoose.model('loanType',loanTypeSchema)
 module.exports={
-  loanTypeModel,
-  loanTypeValidation,
-  loanTypeUpdateValidation
+  loanTypeModel
 }

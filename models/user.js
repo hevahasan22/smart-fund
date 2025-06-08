@@ -11,6 +11,7 @@ const userSchema = new mongoose.Schema(
       unique: true,
       minlength: 3,
       maxlength: 20,
+      match: [/^[a-zA-Z ]+$/, 'First name can only contain letters and spaces']
     },
     userLastName: {
       type: String,
@@ -19,6 +20,7 @@ const userSchema = new mongoose.Schema(
       unique: true,
       minlength: 3,
       maxlength: 20,
+       match: [/^[a-zA-Z ]+$/, 'Last name can only contain letters and spaces']
     },
     email: {
       type: String,
@@ -27,6 +29,7 @@ const userSchema = new mongoose.Schema(
       unique: true,
       minlength: 4,
       maxlength: 100,
+      lowercase: true,
     },
     password: {
       type: String,
@@ -36,20 +39,58 @@ const userSchema = new mongoose.Schema(
     phoneNumber: {
       type: Number,
       required: false,
+      unique:true,
+      validate: {
+      validator: (v) => /^[0-9]{10,15}$/.test(v),
+      message: 'Phone number must be 10-15 digits'
+      }
     },
     DateOfBirth: {
       type: Date,
       required: false,
+      validate: {
+      validator: function(v) {
+        const today = new Date();
+        const birthDate = new Date(v);
+        const age = today.getFullYear() - birthDate.getFullYear();
+        const monthDiff = today.getMonth() - birthDate.getMonth();
+        return age > 18 || (age === 18 && monthDiff >= 0);
+      },
+      message: 'You must be at least 18 years old'
+      }
     },
     address: {
       type: String,
       required: false,
+    },
+    status: {
+          type:String,
+          enum: ['eligible', 'max_sponsors_reached'], 
+          default: 'eligible'
+    },
+     creditID: { 
+          type: String, 
+          required: false, 
+          unique: true,
+          validate: {
+            validator: (v) => /^[a-zA-Z0-9]{8,20}$/.test(v),
+            message: 'Invalid credit ID format'
+          }
+    },
+    income: {
+          type:Number,
+          required:true,
     },
     role: {
       type: String,
       enum: ['user', 'admin'],
       default: 'user',
     },
+    loanRole: {
+    type: [String],
+    enum: ['borrower', 'sponsor'],
+    default: ['borrower']
+   },
     employmentStatus: {
       type: String,
       enum: ['employed', 'self-employed', 'unemployed'],
@@ -78,6 +119,17 @@ const userSchema = new mongoose.Schema(
   }
 );
 
+// Update sponsor status when they reach limit
+userSchema.methods.updateSponsorStatus = async function() {
+  const activeSponsorships = await Contract.countDocuments({
+    $or: [{ sponser: this._id }, { sponser: this._id }],
+    status: { $in: ['approved', 'active'] }
+  });
+  
+  this.status = activeSponsorships >= 2 ? 'max_sponsors_reached' : 'eligible';
+  await this.save();
+};
+
 // Validate Register User
 function validateRegisterUser(obj) {
   const schema = Joi.object({
@@ -99,6 +151,20 @@ function validateLoginUser(obj) {
   });
 
   return schema.validate(obj);
+}
+
+//Validate Update User Informations
+function ValidateUpdateUser(obj) {
+  const schema=Joi.object({
+    email: Joi.string().trim().min(4).max(100).required().email(),
+    userFirstName: Joi.string().trim().min(4).max(20).required(),
+    userLastName: Joi.string().trim().min(4).max(20).required(),
+    password: Joi.string().min(8).required(),
+    phoneNumber: Joi.string().pattern(/^\+?[\d\s-]{10,}$/),
+    DateOfBirth: Joi.date(),
+    address: Joi.string().trim().min(4).max(100),
+    
+  })  
 }
 
 // Validate Verify User

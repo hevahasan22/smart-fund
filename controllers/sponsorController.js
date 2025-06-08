@@ -1,4 +1,4 @@
-const { Sponsor, validateSponsor } = require('../models/sponsor');
+const { Sponsor, validateSponsor } = require('../models/user');
 const { Contract } = require('../models/contract');
 
 exports.createSponsor = async (req, res) => {

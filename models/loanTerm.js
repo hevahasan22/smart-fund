@@ -3,41 +3,30 @@ const Joi=require('joi')
 const loanTermSchema=new mongoose.Schema({
     type:{
         type:String,
-        trim:true,
+        enum: ['short-term', 'long-term'],
         required:true,
-        unique:true,
-        minlength:4,
-        maxlength:20
+        unique:true
     },
     maxTerm:{
         type:Number,
         trim:true,
-        required:true
+        required:true,
+        validate: {
+          validator: function(v) {
+            return v > this.minTerm;
+          },
+          message: 'Max term must be greater than min term'
+        }
     },
     minTerm:{
         type:Number,
-        trim:true,
         required:true,
+        min: [1, 'Minimum term must be at least 1 month']
     },
 })
-
-
-const loanTermValidation = Joi.object({
-    type: Joi.string().required(),
-    maxTerm: Joi.number().min(0).required(),
-    minTerm: Joi.number().min(0).required()
-  });
-
-  const loanTermUpdateValidation = Joi.object({
-    type: Joi.string().required(),
-    maxTerm: Joi.number().min(0).required(),
-    minTerm: Joi.number().min(0).required()
-  });
 
   
 const loanTermModel=mongoose.model('loanTerm',loanTermSchema)
 module.exports={
-  loanTermModel,
-  loanTermValidation,
-  loanTermUpdateValidation
+  loanTermModel
 }

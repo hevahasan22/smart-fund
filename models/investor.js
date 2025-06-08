@@ -18,13 +18,21 @@ const investorSchema=new mongoose.Schema(
         required:true,
         minlength:8,
         maxlength:20,
-        unique:true
+        unique:true,
+        validate: {
+          validator: (v) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v),
+          message: 'Invalid email format'
+        }
       },
       contactPhone:
       {
         type:Number,
         required:true,
-        unique:true
+        unique:true,
+        validate: {
+          validator: (v) => /^[0-9]{10,15}$/.test(v),
+          message: 'Phone number must be 10-15 digits'
+        }
       }
     },
     {
@@ -37,4 +45,3 @@ const investorModel=mongoose.model('investor',investorSchema)
 module.exports={
   investorModel
 }
-//hgfjf
