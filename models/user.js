@@ -93,7 +93,7 @@ const userSchema = new mongoose.Schema(
    },
     employmentStatus: {
       type: String,
-      enum: ['employed', 'self-employed', 'unemployed'],
+      enum: ['employed', 'self-employed', 'unemployed', 'student'],
     },
     contract: {
       type: mongoose.Schema.Types.ObjectId,
@@ -163,6 +163,7 @@ function ValidateUpdateUser(obj) {
     phoneNumber: Joi.string().pattern(/^\+?[\d\s-]{10,}$/),
     DateOfBirth: Joi.date(),
     address: Joi.string().trim().min(4).max(100),
+    creditID: Joi.string()
     
   })  
 }

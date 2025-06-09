@@ -12,7 +12,12 @@ const typetermSchema=new mongoose.Schema({
         type:mongoose.Schema.Types.ObjectId,
         ref:'loanTerm',
         required:true
-    }   
+    } ,
+      interestRate:{
+        type:Number,
+        required:true,
+        min: [0, 'Interest rate cannot be negative']
+    },  
 }, { timestamps: true })
 
 // Ensure unique combination of loan type and term

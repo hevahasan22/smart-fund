@@ -81,13 +81,12 @@ loanSchema.pre('save', function(next) {
   next();
 });
 
-// Get interest rate from loan type
+// Get interest rate from loan typeterm
 loanSchema.methods.getInterestRate = async function() {
   const typeTerm = await mongoose.model('typeterm')
-    .findById(this.typeTermID)
-    .populate('loanTypeID');
+    .findById(this.typeTermID);
   
-  return typeTerm.loanTypeID.interestRate;
+  return typeTerm.interestRate;
 };
 
 const loanModel=mongoose.model('loan',loanSchema)

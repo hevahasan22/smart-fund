@@ -9,11 +9,7 @@ const loanTypeSchema=new mongoose.Schema({
         minlength:4,
         maxlength:20
     },
-    interestRate:{
-        type:Number,
-        required:true,
-        min: [0, 'Interest rate cannot be negative']
-    },
+  
     maxAmount:{
         type:Number,
         required:true,
