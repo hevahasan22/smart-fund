@@ -51,8 +51,8 @@ app.use((err, req, res, next) => {
 app.use(express.urlencoded({ extended: true }));
 
 
-//mongo connecter
-const moongoURI= "mongodb://localhost:27017/test"
+//mongo connecterMONGO_URI
+const moongoURI= process.env.MONGO_URI
 mongoose.connect(moongoURI)
 .then(()=>{
     console.log('Connected to MongoDB')

@@ -79,7 +79,7 @@ const userSchema = new mongoose.Schema(
     },
     income: {
           type:Number,
-          required:true,
+          required:false,
     },
     role: {
       type: String,
@@ -137,7 +137,7 @@ function validateRegisterUser(obj) {
     userFirstName: Joi.string().trim().min(4).max(20).required(),
     userLastName: Joi.string().trim().min(4).max(20).required(),
     password: Joi.string().min(8).required(),
-    phoneNumber: Joi.number(),
+    //phoneNumber: Joi.number(),
   });
 
   return schema.validate(obj);
