@@ -1,4 +1,4 @@
-const { TypeTerm, validateTypeTerm } = require('../models/typeTerm');
+const { TypeTerm, validateTypeTerm } = require('../models/typeterm');
 
 exports.createTypeTerm = async (req, res) => {
   const { error } = validateTypeTerm(req.body);

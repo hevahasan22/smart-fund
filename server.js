@@ -24,6 +24,7 @@ const investorRoutes = require('./routes/investor');
 const typeTermRoutes = require('./routes/typeTerm');
 const loanTypeRoutes = require('./routes/loanType');
 const loanTermRoutes = require('./routes/loanTerm');
+const { userModel } = require('./models/user');
 
 app.use('/api', router);
 
@@ -55,7 +56,8 @@ app.use(express.urlencoded({ extended: true }));
 const moongoURI= process.env.MONGO_URI
 mongoose.connect(moongoURI)
 .then(()=>{
-    console.log('Connected to MongoDB')
+    console.log('Connected to MongoDB');
+
 })
 .catch((err)=>{
     console.log('Failed to connect to MongoDB:', err)

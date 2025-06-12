@@ -8,7 +8,6 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
-      unique: true,
       minlength: 3,
       maxlength: 20,
       match: [/^[a-zA-Z ]+$/, 'First name can only contain letters and spaces']
@@ -17,7 +16,6 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
-      unique: true,
       minlength: 3,
       maxlength: 20,
        match: [/^[a-zA-Z ]+$/, 'Last name can only contain letters and spaces']
@@ -39,7 +37,6 @@ const userSchema = new mongoose.Schema(
     phoneNumber: {
       type: Number,
       required: false,
-      unique:true,
       validate: {
       validator: (v) => /^[0-9]{10,15}$/.test(v),
       message: 'Phone number must be 10-15 digits'
@@ -70,8 +67,8 @@ const userSchema = new mongoose.Schema(
     },
      creditID: { 
           type: String, 
-          required: false, 
-          unique: true,
+          required: false,
+          default: undefined,
           validate: {
             validator: (v) => /^[a-zA-Z0-9]{8,20}$/.test(v),
             message: 'Invalid credit ID format'
@@ -119,6 +116,17 @@ const userSchema = new mongoose.Schema(
   }
 );
 
+
+// Change your index definition to:
+userSchema.index(
+  { creditID: 1 },
+  {
+    name: "creditID_unique_partial", // Unique name
+    unique: true,
+    partialFilterExpression: { creditID: { $type: "string" } }
+  }
+);
+
 // Update sponsor status when they reach limit
 userSchema.methods.updateSponsorStatus = async function() {
   const activeSponsorships = await Contract.countDocuments({
@@ -136,8 +144,7 @@ function validateRegisterUser(obj) {
     email: Joi.string().trim().min(4).max(100).required().email(),
     userFirstName: Joi.string().trim().min(4).max(20).required(),
     userLastName: Joi.string().trim().min(4).max(20).required(),
-    password: Joi.string().min(8).required(),
-    //phoneNumber: Joi.number(),
+    password: Joi.string().min(8).required()
   });
 
   return schema.validate(obj);
@@ -163,7 +170,7 @@ function ValidateUpdateUser(obj) {
     phoneNumber: Joi.string().pattern(/^\+?[\d\s-]{10,}$/),
     DateOfBirth: Joi.date(),
     address: Joi.string().trim().min(4).max(100),
-    creditID: Joi.string()
+    creditID: Joi.string().allow(null, '').optional()
     
   })  
 }
