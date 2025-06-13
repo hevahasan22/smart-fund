@@ -16,8 +16,6 @@ const userRoutes =require('./routes/user');
 const uploadRouter=require('./routes/upload')
 const sponsorRoutes = require('./routes/sponsor');
 const contractRoutes = require('./routes/contract');
-// const additionalDocumentRoutes = require('./routes/additionalDocumet');
-// const additionalDocumentTypeRoutes = require('./routes/additionalDocumentType');
 const paymentRoutes = require('./routes/payment');
 const loanRoutes = require('./routes/loan');
 const investorRoutes = require('./routes/investor');
@@ -34,8 +32,6 @@ app.use('/api',uploadRouter)
 app.use('/api/users', userRoutes);
 app.use('/api/sponsors', sponsorRoutes);
 app.use('/api/contracts', contractRoutes);
-// app.use('/api/documents', additionalDocumentRoutes);
-// app.use('/api/document-types', additionalDocumentTypeRoutes);
 app.use('/api/payments', paymentRoutes);
 app.use('/api/loans', loanRoutes);
 app.use('/api/investors', investorRoutes);

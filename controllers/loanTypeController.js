@@ -1,4 +1,4 @@
-const { LoanType, validateLoanType } = require('../models/loanType');
+const { LoanType, validateLoanType } = require('../models/loanType')
 
 exports.createLoanType = async (req, res) => {
   const { error } = validateLoanType(req.body);

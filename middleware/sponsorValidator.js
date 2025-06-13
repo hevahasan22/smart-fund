@@ -1,6 +1,8 @@
 // middlewares/sponsorValidator.js
 const Contract = require('../models/contract');
 const Loan = require('../models/loan');
+const Sponsor=require('../models/sponsor')
+
 
 const validateSponsors = async (req, res, next) => {
   const { sponser1, sponser2, loanID } = req.body;

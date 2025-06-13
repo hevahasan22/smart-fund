@@ -1,65 +1,68 @@
-const { Contract, validateContract } = require('../models/contract');
-const { AdditionalDocument } = require('../models/additionalDocument');
-const { Loan } = require('../models/loan');
-const { Payment } = require('../models/payment');
+const Contract = require('../models/contract');
+const Sponsor = require('../models/sponsor');
+const Loan = require('../models/loan');
 
 exports.createContract = async (req, res) => {
-  const { error } = validateContract(req.body);
-  if (error) return res.status(400).send(error.details[0].message);
-
-  const { userID, sponsorID_1, sponsorID_2, loanTypeID, loanTerm, employmentStatus, documents } = req.body;
-
-  // Check sponsor availability
-  const sponsor1Contracts = await Contract.find({ sponsorID_1 });
-  const sponsor2Contracts = sponsorID_2 ? await Contract.find({ sponsorID_2 }) : [];
-  if (sponsor1Contracts.length >= 2 || sponsor2Contracts.length >= 2) {
-    return res.status(400).send('One or both sponsors have reached their contract limit');
-  }
-
-  // Validate documents
-  const requiredDocs = await AdditionalDocumentType.find({ loanTypeID, isRequired: true });
-  const uploadedDocTypes = documents.map(doc => doc.typeID);
-  const missingDocs = requiredDocs.filter(doc => !uploadedDocTypes.includes(doc.typeID));
-  if (missingDocs.length > 0) {
-    return res.status(400).send('Missing required documents');
-  }
-
-  // Create contract
-  const contract = new Contract({ userID, sponsorID_1, sponsorID_2, status: 'pending' });
-  await contract.save();
-
-  // Save documents
-  for (const doc of documents) {
-    const additionalDoc = new AdditionalDocument({
-      CID: `DOC${Date.now()}`,
-      typeID: doc.typeID,
-      contractID: contract.contractID,
-      documentFile: doc.documentFile
+  try {
+    const { loanType, loanTerm, sponsors, documents } = req.body;
+    const userId = req.user.id;
+    
+    // Create contract
+    const contract = new Contract({
+      userID: userId,
+      sponsorID_1: sponsors[0],
+      sponsorID_2: sponsors[1],
+      loanType,
+      loanTerm,
+      status: 'pending'
     });
-    await additionalDoc.save();
+
+    await contract.save();
+    
+    // Start approval process
+    processContractApproval(contract);
+    
+    res.status(201).json(contract);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
-
-  // Create loan
-  const loan = new Loan({
-    loanID: `LOAN${Date.now()}`,
-    loanAmount: req.body.loanAmount,
-    loanTerm,
-    interestRate: req.body.interestRate,
-    startDate: new Date(),
-    endDate: new Date(new Date().setFullYear(new Date().getFullYear() + parseInt(loanTerm))),
-    typeID: loanTypeID,
-    investorID: req.body.investorID
-  });
-  await loan.save();
-
-  // Create initial payment
-  const payment = new Payment({
-    paymentID: `PAY${Date.now()}`,
-    dueDate: new Date(new Date().setMonth(new Date().getMonth() + 1)),
-    status: 'pending',
-    loanID: loan.loanID
-  });
-  await payment.save();
-
-  res.send({ contract, loan, payment });
 };
+
+// Approval processing logic
+const processContractApproval = async (contract) => {
+  try {
+    // Priority processing (medical > educational > personal)
+    const priority = {
+      medical: 1,
+      educational: 2,
+      personal: 3
+    };
+    
+    const delay = priority[contract.loanType] * 5000; // Simulated priority delay
+    
+    setTimeout(async () => {
+      const updatedContract = await Contract.findById(contract._id);
+      if (updatedContract.status === 'pending') {
+        updatedContract.status = 'approved';
+        await updatedContract.save();
+        
+        // Create loan after approval
+        const loan = await createLoan(updatedContract);
+      }
+    }, delay);
+  } catch (error) {
+    console.error('Contract approval error:', error);
+  }
+};
+
+
+exports.getUserContracts = async (req, res) => {
+  try {
+    const contracts = await Contract.find({ userID: req.user.id });
+    res.json(contracts);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+// Helper to create loan
+const createLoan = require('./loanController').createLoan;
