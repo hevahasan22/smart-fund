@@ -8,7 +8,6 @@ const Investor = require('./investor');
 const TypeTerm = require('./typeterm');
 const LoanType = require('./loanType');
 const LoanTerm = require('./loanTerm');
-const Sponsor=require('./sponsor')
 
 module.exports = {
   User,
@@ -20,6 +19,5 @@ module.exports = {
   Investor,
   TypeTerm,
   LoanType,
-  LoanTerm,
-  Sponsor
+  LoanTerm
 };

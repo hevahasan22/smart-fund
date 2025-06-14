@@ -1,5 +1,6 @@
-const { Payment, validatePayment } = require('../models/payment');
-const { Loan } = require('../models/loan');
+const Payment = require('../models/payment');
+const Loan = require('../models/loan');
+const notificationService = require('../services/notificationService');
 
 exports.createPayment = async (req, res) => {
   const { error } = validatePayment(req.body);
@@ -18,7 +19,17 @@ exports.createPayment = async (req, res) => {
 
   // Check for overdue payments
   if (new Date() > payment.dueDate && payment.status !== 'completed') {
-    // TODO: Send warning notification
+    try {
+      // Get loan with populated user data
+      const loan = await Loan.findOne({ loanID: payment.loanID }).populate('user', 'email firstName');
+      
+      if (loan && loan.user) {
+        // Send payment reminder email
+        await notificationService.sendPaymentReminder(payment, loan.user);
+      }
+    } catch (err) {
+      console.error('Failed to send payment reminder:', err);
+    }
   }
 
   res.send(payment);

@@ -1,23 +1,29 @@
 const Loan = require('../models/loan');
 const Payment = require('../models/payment');
-const LoanType = require('../models/loanType');
+const TypeTerm = require('../models/typeterm');
 
 exports.createLoan = async (contract) => {
   try {
-    const loanType = await LoanType.findById(contract.loanType);
-    if (!loanType) throw new Error('Loan type not found');
+    // Get the typeTerm details to access interestRate
+    const typeTerm = await TypeTerm.findById(contract.typeTermID)
+      .populate('loanTypeID')
+      .populate('loanTermID');
     
-    // Calculate loan details
-    const termMonths = contract.loanTerm === 'short-term' ? 12 : 36;
-    const endDate = new Date();
-    endDate.setMonth(endDate.getMonth() + termMonths);
+    if (!typeTerm) throw new Error('TypeTerm combination not found');
+    
+    // Calculate end date based on contract's term months
+    const endDate = new Date(contract.startDate);
+    endDate.setMonth(endDate.getMonth() + contract.loanTermMonths);
     
     // Create loan
     const loan = new Loan({
       contractID: contract._id,
+      typeTermID: contract.typeTermID,
+      userID: contract.userID,
       loanAmount: contract.loanAmount,
-      interestRate: loanType.interestRate,
-      startDate: new Date(),
+      loanTermMonths: contract.loanTermMonths,
+      interestRate: typeTerm.interestRate,
+      startDate: contract.startDate,
       endDate,
       status: 'active'
     });
@@ -30,14 +36,15 @@ exports.createLoan = async (contract) => {
     return loan;
   } catch (error) {
     console.error('Loan creation error:', error);
+    throw error; // Rethrow to handle in calling function
   }
 };
 
-const createPaymentSchedule = async (loan, termMonths) => {
+const createPaymentSchedule = async (loan) => {
   const monthlyPayment = calculateMonthlyPayment(
     loan.loanAmount, 
     loan.interestRate, 
-    termMonths
+    loan.loanTermMonths
   );
   
   const payments = [];
