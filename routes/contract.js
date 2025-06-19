@@ -6,7 +6,7 @@ const auth = require('../middleware/auth');
 
 // Apply for new loan contract
 router.post(
-  '/',
+  '/apply',
   auth,
   sponsorValidator,
   contractController.createContract
@@ -18,5 +18,11 @@ router.get(
   auth,
   contractController.getUserContracts
 );
+
+// New sponsor contracts route
+router.get(
+  '/sponsor-contracts',
+  auth,
+  contractController.getSponsorContracts);
 
 module.exports = router;

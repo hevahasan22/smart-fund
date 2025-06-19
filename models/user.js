@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const Schema = mongoose.Schema;
 const Joi = require('joi');
 
 // User Schema
@@ -92,6 +93,18 @@ const userSchema = new mongoose.Schema(
       type: String,
       enum: ['employed', 'self-employed', 'unemployed', 'student'],
     },
+    pendingApprovals: [{
+    contractId: { type: Schema.Types.ObjectId, ref: 'Contract', required: true },
+    borrowerId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
+    requestedAt: { type: Date, default: Date.now }
+  }],
+  notifications: [{
+    type: { type: String, required: true }, // e.g., 'contract_approved'
+    message: { type: String, required: true },
+    contractId: { type: Schema.Types.ObjectId, ref: 'Contract' },
+    createdAt: { type: Date, default: Date.now },
+    isRead: { type: Boolean, default: false }
+  }],
     contract: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'contract',
