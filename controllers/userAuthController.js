@@ -35,7 +35,7 @@ exports.register = async (req, res) => {
 
     // Generate verification code
     const verificationCode = generateVerificationCode();
-    const verificationCodeExpires = new Date(Date.now() + 10 * 60 * 1000); // Expires in 10 minutes
+    const verificationCodeExpires = new Date(Date.now() + 15 * 60 * 1000); // Expires in 15 minutes
 
     // Hash password
     const saltRounds = 12;
