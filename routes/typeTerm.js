@@ -1,8 +1,8 @@
 const express = require('express');
 const router = express.Router();
 const typeTermController = require('../controllers/typeTermController');
-const auth = require('../middleware/auth');
+const {verifyTokenAndAdmin} = require('../middleware/auth');
 
-router.post('/', auth, typeTermController.createTypeTerm);
+router.post('/', verifyTokenAndAdmin, typeTermController.createTypeTerm);
 
 module.exports = router;

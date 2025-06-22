@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { validateRegisterUser, validateLoginUser, validateVerifyUser,validateResendOtp } = require('../models/user');
-const userController = require('../controllers/userController');
+const userController = require('../controllers/userAuthController');
 
 // const validate = (schema) => (req, res, next) => {
 //   const { error } = schema(req.body); // Call the validation function

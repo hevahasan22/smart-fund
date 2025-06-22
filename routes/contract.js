@@ -1,28 +1,29 @@
 const express = require('express');
-const router = express.Router();
-const contractController = require('../controllers/contractController');
-const sponsorValidator = require('../middleware/sponsorValidator');
-const auth = require('../middleware/auth');
+     const router = express.Router();
+     const contractController = require('../controllers/contractController');
+     const sponsorValidator = require('../middleware/sponsorValidator');
+     const { verifyTokenAndAuthorization } = require('../middleware/auth');
 
-// Apply for new loan contract
-router.post(
-  '/apply',
-  auth,
-  sponsorValidator,
-  contractController.createContract
-);
+     // Apply for new loan contract
+     router.post(
+       '/apply',
+       verifyTokenAndAuthorization, // Fixed: Use verifyTokenAndAuthorization
+       sponsorValidator,
+       contractController.createContract
+     );
 
-// Get user contracts
-router.get(
-  '/my-contracts',
-  auth,
-  contractController.getUserContracts
-);
+     // Get user contracts
+     router.get(
+       '/my-contracts',
+       verifyTokenAndAuthorization,
+       contractController.getUserContracts
+     );
 
-// New sponsor contracts route
-router.get(
-  '/sponsor-contracts',
-  auth,
-  contractController.getSponsorContracts);
+     // Get sponsor contracts
+     router.get(
+       '/sponsor-contracts',
+       verifyTokenAndAuthorization,
+       contractController.getSponsorContracts
+     );
 
-module.exports = router;
+     module.exports = router;

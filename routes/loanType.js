@@ -1,9 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const loanTypeController = require('../controllers/loanTypeController');
-const auth = require('../middleware/auth');
+const {verifyTokenAndAdmin,verifyTokenAndAuthorization} = require('../middleware/auth');
 
-router.post('/', auth, loanTypeController.createLoanType);
-router.get('/', auth, loanTypeController.getLoanTypes);
+router.post('/', verifyTokenAndAdmin, loanTypeController.createLoanType);
+router.get('/', verifyTokenAndAdmin,verifyTokenAndAuthorization, loanTypeController.getLoanTypes);
 
 module.exports = router;

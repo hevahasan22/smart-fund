@@ -3,7 +3,7 @@ const router = express.Router();
 const asyncHandler = require('../middleware/asyncHandler'); // Recommended instead of wrapping each route
 
 // Import route handlers
-const userRoutes = require('./user');
+const userRoutes = require('./userAuth');
 const uploadRoutes = require('./upload');
 const sponsorRoutes = require('./sponsor');
 const contractRoutes = require('./contract');
