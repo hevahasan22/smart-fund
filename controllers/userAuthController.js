@@ -1,7 +1,7 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
-const { userModel, validateRegisterUser, validateLoginUser } = require('../models/user');
+const { User, validateRegisterUser, validateLoginUser } = require('../models/user');
 
 // Nodemailer setup (using Gmail)
 const transporter = nodemailer.createTransport({
@@ -25,10 +25,12 @@ exports.register = async (req, res) => {
   }
 
   try {
-    const { email, password, userFirstName, userLastName, employmentStatus } = req.body;
+    const { email, password, userFirstName, userLastName, employmentStatus,phoneNumber,
+      DateOfBirth,address,gender,income,creditID
+     } = req.body;
 
     // Check if user exists
-    const existingUser = await userModel.findOne({ email });
+    const existingUser = await User.findOne({ email });
     if (existingUser) {
       return res.status(400).json({ success: false, message: 'Email already registered' });
     }
@@ -42,15 +44,21 @@ exports.register = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
     // Create new user (unverified)
-    const user = new userModel({
-      email,
-      userFirstName,
-      userLastName,
-      employmentStatus,
-      password: hashedPassword,
-      isVerified: false,
-      verificationCode,
-      verificationCodeExpires,
+    const user = new User({
+    email,
+    userFirstName,
+    userLastName,
+    employmentStatus,
+    phoneNumber,       
+    DateOfBirth,        
+    address,
+    gender,
+    income,             
+    creditID,
+    password: hashedPassword,
+    isVerified: false,
+    verificationCode,
+    verificationCodeExpires,
     });
 
     const result = await user.save();
@@ -88,7 +96,7 @@ exports.resendOtp = async (req, res) => {
   }
 
   try {
-    const user = await userModel.findOne({ email });
+    const user = await User.findOne({ email });
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
@@ -137,7 +145,7 @@ exports.login = async (req, res) => {
     const { email, password } = req.body;
 
     // Find user
-    const user = await userModel.findOne({ email });
+    const user = await User.findOne({ email });
     if (!user) {
       return res.status(400).json({ success: false, message: 'Invalid credentials' });
     }
@@ -186,7 +194,7 @@ exports.verifyEmail = async (req, res) => {
 
   try {
     // Find user
-    const user = await userModel.findOne({ email });
+    const user = await User.findOne({ email });
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
@@ -232,7 +240,7 @@ exports.verifyEmail = async (req, res) => {
 // Get user by ID
 exports.getUser = async (req, res) => {
   try {
-    const user = await userModel.findOne({ _id: req.params.userId });
+    const user = await User.findOne({ _id: req.params.userId });
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }

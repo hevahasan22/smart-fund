@@ -36,8 +36,8 @@ const userSchema = new mongoose.Schema(
       minlength: 8,
     },
     phoneNumber: {
-      type: Number,
-      required: false,
+      type: String,
+      required: true,
       validate: {
       validator: (v) => /^[0-9]{10,15}$/.test(v),
       message: 'Phone number must be 10-15 digits'
@@ -45,7 +45,7 @@ const userSchema = new mongoose.Schema(
     },
     DateOfBirth: {
       type: Date,
-      required: false,
+      required: true,
       validate: {
       validator: function(v) {
         const today = new Date();
@@ -61,23 +61,31 @@ const userSchema = new mongoose.Schema(
       type: String,
       required: false,
     },
-    status: {
-          type:String,
-          enum: ['eligible', 'max_sponsors_reached'], 
-          default: 'eligible'
+    gender:{
+      type:String,
+      enum:['female','male']
     },
-     creditID: { 
-          type: String, 
-          required: false,
-          default: undefined,
-          validate: {
-            validator: (v) => /^[a-zA-Z0-9]{8,20}$/.test(v),
-            message: 'Invalid credit ID format'
-          }
+    employmentStatus: {
+      type: String,
+      enum: ['employed', 'self-employed', 'unemployed', 'student'],
+    },
+    creditID: { 
+      type: String, 
+      required:false,
+      default: undefined,
+      validate: {
+        validator: (v) => /^[a-zA-Z0-9]{8,20}$/.test(v),
+        message: 'Invalid credit ID format'
+        }
     },
     income: {
-          type:Number,
-          required:false,
+      type:Number,
+      required:true,
+    },
+    status: {
+      type:String,
+      enum: ['eligible', 'max_sponsors_reached'], 
+      default: 'eligible'
     },
     role: {
       type: String,
@@ -89,10 +97,6 @@ const userSchema = new mongoose.Schema(
     enum: ['borrower', 'sponsor'],
     default: ['borrower']
    },
-    employmentStatus: {
-      type: String,
-      enum: ['employed', 'self-employed', 'unemployed', 'student'],
-    },
     pendingApprovals: [{
     contractId: { type: Schema.Types.ObjectId, ref: 'Contract', required: true },
     borrowerId: { type: Schema.Types.ObjectId, ref: 'User', required: true },
@@ -151,41 +155,47 @@ userSchema.methods.updateSponsorStatus = async function() {
   await this.save();
 };
 
-// Validate Register User
+// Validation functions
 function validateRegisterUser(obj) {
   const schema = Joi.object({
     email: Joi.string().trim().min(4).max(100).required().email(),
-    userFirstName: Joi.string().trim().min(4).max(20).required(),
-    userLastName: Joi.string().trim().min(4).max(20).required(),
-    password: Joi.string().min(8).required()
+    userFirstName: Joi.string().trim().min(3).max(20).required(),
+    userLastName: Joi.string().trim().min(3).max(20).required(),
+    password: Joi.string().min(8).required(),
+    phoneNumber: Joi.string().required().pattern(/^[0-9]{10,15}$/),
+    address: Joi.string().optional(),
+    DateOfBirth: Joi.date().required(),
+    gender: Joi.string().valid('female', 'male').optional(),
+    employmentStatus: Joi.string().valid('student', 'employee', 'unemployed', 'employed', 'self-employed').optional(),
+    income: Joi.number().required(),
+    creditID: Joi.string().optional(),
   });
-
   return schema.validate(obj);
 }
 
-// Validate Login User
 function validateLoginUser(obj) {
   const schema = Joi.object({
     email: Joi.string().trim().min(4).max(100).required().email(),
-    password: Joi.string().trim().min(4).max(20).required(),
+    password: Joi.string().min(8).required(),
   });
-
   return schema.validate(obj);
 }
 
-//Validate Update User Informations
 function ValidateUpdateUser(obj) {
-  const schema=Joi.object({
-    email: Joi.string().trim().min(4).max(100).required().email(),
-    userFirstName: Joi.string().trim().min(4).max(20).required(),
-    userLastName: Joi.string().trim().min(4).max(20).required(),
-    password: Joi.string().min(8).required(),
-    phoneNumber: Joi.string().pattern(/^\+?[\d\s-]{10,}$/),
+  const schema = Joi.object({
+    email: Joi.string().trim().min(4).max(100).email(),
+    userFirstName: Joi.string().trim().min(3).max(20),
+    userLastName: Joi.string().trim().min(3).max(20),
+    password: Joi.string().min(8),
+    phoneNumber: Joi.string().pattern(/^[0-9]{10,15}$/),
     DateOfBirth: Joi.date(),
     address: Joi.string().trim().min(4).max(100),
-    creditID: Joi.string().allow(null, '').optional()
-    
-  })  
+    creditID: Joi.string().allow(null, '').optional(),
+    gender: Joi.string().valid('female', 'male').optional(),
+    employmentStatus:Joi.string().valid('student','employee','unemploeed').optional(),
+    income: Joi.number(),
+  });
+  return schema.validate(obj);
 }
 
 // Validate Verify User
@@ -208,11 +218,11 @@ function validateResendOtp(obj) {
 }
 
 // Model
-const userModel = mongoose.model('user', userSchema);
+const User = mongoose.model('User', userSchema);
 
 // Exports
 module.exports = {
-  userModel,
+  User,
   validateRegisterUser,
   validateLoginUser,
   validateVerifyUser,

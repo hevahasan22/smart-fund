@@ -1,4 +1,4 @@
-const User = require('./user');
+const {User,validateLoginUser,validateRegisterUser,validateVerifyUser,validateResendOtp} = require('./user');
 const Contract = require('./contract');
 const AdditionalDocument = require('./additionalDocument');
 const AdditionalDocumentType = require('./additionalDocumentType');
