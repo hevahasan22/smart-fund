@@ -31,7 +31,7 @@ exports.createLoan = async (contract) => {
     await loan.save();
     
     // Create payment schedule
-    await createPaymentSchedule(loan, termMonths);
+    await createPaymentSchedule(loan, loan.loanTermMonths);
     
     return loan;
   } catch (error) {
@@ -40,11 +40,90 @@ exports.createLoan = async (contract) => {
   }
 };
 
-const createPaymentSchedule = async (loan) => {
+// Get user loans
+exports.getUserLoans = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    
+    const loans = await Loan.find({ userID: userId })
+      .populate({
+        path: 'contractID',
+        populate: [
+          { path: 'sponsorID_1', select: 'firstName lastName' },
+          { path: 'sponsorID_2', select: 'firstName lastName' },
+          { 
+            path: 'typeTermID',
+            populate: [
+              { path: 'loanTypeID', select: 'loanName' },
+              { path: 'loanTermID', select: 'termName' }
+            ]
+          }
+        ]
+      })
+      .populate('payments') // Assuming you have payments referenced in Loan model
+      .sort({ startDate: -1 }); // Newest loans first
+
+    res.json(loans);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Get loan by ID
+exports.getLoanById = async (req, res) => {
+  try {
+    const loanId = req.params.id;
+    
+    const loan = await Loan.findById(loanId)
+      .populate({
+        path: 'contractID',
+        populate: [
+          { path: 'sponsorID_1', select: 'firstName lastName' },
+          { path: 'sponsorID_2', select: 'firstName lastName' },
+          { 
+            path: 'typeTermID',
+            populate: [
+              { path: 'loanTypeID', select: 'loanName minAmount maxAmount' },
+              { path: 'loanTermID', select: 'termName minTerm maxTerm' }
+            ]
+          }
+        ]
+      })
+      .populate({
+        path: 'payments',
+        options: { sort: { dueDate: 1 } } // Sort payments by due date
+      })
+      .populate('userID', 'firstName lastName email'); // Include borrower info
+
+    if (!loan) {
+      return res.status(404).json({ error: 'Loan not found' });
+    }
+
+    // Calculate loan summary
+    const totalAmount = loan.loanAmount;
+    const paidAmount = loan.payments.reduce((sum, payment) => 
+      payment.status === 'paid' ? sum + payment.amount : sum, 0);
+    const remainingAmount = totalAmount - paidAmount;
+    
+    // Add calculated fields to response
+    const loanWithSummary = {
+      ...loan.toObject(),
+      totalAmount,
+      paidAmount,
+      remainingAmount
+    };
+
+    res.json(loanWithSummary);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+const createPaymentSchedule = async (loan, termMonths) => {
   const monthlyPayment = calculateMonthlyPayment(
     loan.loanAmount, 
     loan.interestRate, 
-    loan.loanTermMonths
+    termMonths
   );
   
   const payments = [];

@@ -1,36 +1,243 @@
 const Payment = require('../models/payment');
 const Loan = require('../models/loan');
-const notificationService = require('../services/notificationService');
+const User = require('../models/user');
+const cron = require('node-cron');
+const moment = require('moment');
 
-exports.createPayment = async (req, res) => {
-  const { error } = validatePayment(req.body);
-  if (error) return res.status(400).send(error.details[0].message);
+// Initialize payment reminder scheduler
+exports.initScheduler = () => {
+  // Schedule daily check for upcoming payments (runs at 9 AM daily)
+  cron.schedule('0 9 * * *', () => {
+    checkUpcomingPayments();
+    checkLatePayments();
+  });
+  console.log('Payment reminder scheduler initialized');
+};
 
-  const payment = new Payment(req.body);
-  await payment.save();
+// Check for payments due in 3 days
+const checkUpcomingPayments = async () => {
+  try {
+    const threeDaysFromNow = moment().add(3, 'days').startOf('day').toDate();
+    const payments = await Payment.find({
+      dueDate: threeDaysFromNow,
+      status: 'pending'
+    }).populate({
+      path: 'loanID',
+      populate: { path: 'userID' }
+    });
 
-  // Check if all payments for the loan are completed
-  const payments = await Payment.find({ loanID: req.body.loanID });
-  const allCompleted = payments.every(p => p.status === 'completed');
-  if (allCompleted) {
-    await Loan.findOneAndUpdate({ loanID: req.body.loanID }, { status: 'completed' });
-    // TODO: Send check to user
-  }
-
-  // Check for overdue payments
-  if (new Date() > payment.dueDate && payment.status !== 'completed') {
-    try {
-      // Get loan with populated user data
-      const loan = await Loan.findOne({ loanID: payment.loanID }).populate('user', 'email firstName');
-      
-      if (loan && loan.user) {
-        // Send payment reminder email
-        await notificationService.sendPaymentReminder(payment, loan.user);
-      }
-    } catch (err) {
-      console.error('Failed to send payment reminder:', err);
+    for (const payment of payments) {
+      const user = payment.loanID.userID;
+      await User.findByIdAndUpdate(user._id, {
+        $push: {
+          notifications: {
+            type: 'payment_reminder',
+            message: `Payment for loan ${payment.loanID._id} is due in 3 days`,
+            paymentId: payment._id,
+            dueDate: payment.dueDate,
+            amount: payment.amount,
+            createdAt: new Date()
+          }
+        }
+      });
     }
+  } catch (error) {
+    console.error('Payment reminder error:', error);
   }
+};
 
-  res.send(payment);
+// Check for late payments
+const checkLatePayments = async () => {
+  try {
+    const yesterday = moment().subtract(1, 'days').endOf('day').toDate();
+    const payments = await Payment.find({
+      dueDate: { $lte: yesterday },
+      status: 'pending'
+    });
+
+    for (const payment of payments) {
+      payment.status = 'late';
+      await payment.save();
+      
+      // Notify borrower
+      const loan = await Loan.findById(payment.loanID).populate('userID');
+      await User.findByIdAndUpdate(loan.userID._id, {
+        $push: {
+          notifications: {
+            type: 'late_payment',
+            message: `Payment for loan ${loan._id} is late! Please pay immediately.`,
+            paymentId: payment._id,
+            dueDate: payment.dueDate,
+            amount: payment.amount,
+            createdAt: new Date()
+          }
+        }
+      });
+    }
+  } catch (error) {
+    console.error('Late payment check error:', error);
+  }
+};
+
+// Process payment via QR confirmation
+exports.processPayment = async (req, res) => {
+  try {
+    const { paymentId } = req.body;
+    const userId = req.user.id;
+
+    // Validate input
+    if (!paymentId) {
+      return res.status(400).json({ error: 'Payment ID is required' });
+    }
+
+    // Get payment and related loan
+    const payment = await Payment.findById(paymentId).populate({
+      path: 'loanID',
+      populate: { path: 'userID' }
+    });
+    
+    if (!payment) {
+      return res.status(404).json({ error: 'Payment not found' });
+    }
+
+    const loan = payment.loanID;
+
+    // Verify authorization - borrower or sponsors can pay
+    const contract = await Contract.findById(loan.contractID);
+    const isBorrower = loan.userID._id.equals(userId);
+    const isSponsor1 = contract?.sponsorID_1.equals(userId);
+    const isSponsor2 = contract?.sponsorID_2.equals(userId);
+
+    if (!(isBorrower || isSponsor1 || isSponsor2)) {
+      return res.status(403).json({ error: 'Unauthorized to make this payment' });
+    }
+
+    // Update payment status
+    payment.status = 'paid';
+    payment.paidAt = new Date();
+    await payment.save();
+
+    // Check if loan is fully paid
+    const remainingPayments = await Payment.countDocuments({
+      loanID: loan._id,
+      status: { $in: ['pending', 'late'] }
+    });
+
+    if (remainingPayments === 0) {
+      loan.status = 'paid';
+      await loan.save();
+    }
+
+    // Create receipt
+    const receipt = {
+      paymentId: payment._id,
+      loanId: loan._id,
+      amount: payment.amount,
+      paidAt: payment.paidAt,
+      paidBy: userId,
+      loanStatus: loan.status
+    };
+
+    // Notify all parties
+    await notifyPayment(payment, loan, userId);
+
+    res.json(receipt);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Notify all parties about payment
+const notifyPayment = async (payment, loan, payerId) => {
+  try {
+    const payer = await User.findById(payerId);
+    const contract = await Contract.findById(loan.contractID)
+      .populate('sponsorID_1')
+      .populate('sponsorID_2')
+      .populate('userID');
+
+    if (!contract) return;
+
+    const parties = [
+      contract.userID, // Borrower
+      contract.sponsorID_1,
+      contract.sponsorID_2
+    ].filter(user => user); // Remove nulls
+
+    const payerName = payer.firstName + ' ' + payer.lastName;
+    const message = `Payment of $${payment.amount.toFixed(2)} for loan ${loan._id} was made by ${payerName}`;
+
+    await Promise.all(parties.map(user => 
+      User.findByIdAndUpdate(user._id, {
+        $push: {
+          notifications: {
+            type: 'payment_made',
+            message,
+            paymentId: payment._id,
+            loanId: loan._id,
+            amount: payment.amount,
+            createdAt: new Date()
+          }
+        }
+      })
+    ));
+  } catch (error) {
+    console.error('Payment notification error:', error);
+  }
+};
+
+// Get all payments for a loan
+exports.getPaymentsByLoanId = async (req, res) => {
+  try {
+    const loanId = req.params.loanId;
+    const userId = req.user.id;
+
+    // Verify loan ownership/authorization
+    const loan = await Loan.findById(loanId);
+    if (!loan) {
+      return res.status(404).json({ error: 'Loan not found' });
+    }
+
+    const contract = await Contract.findById(loan.contractID);
+    const isBorrower = loan.userID.equals(userId);
+    const isSponsor1 = contract?.sponsorID_1.equals(userId);
+    const isSponsor2 = contract?.sponsorID_2.equals(userId);
+
+    if (!(isBorrower || isSponsor1 || isSponsor2)) {
+      return res.status(403).json({ error: 'Unauthorized to view these payments' });
+    }
+
+    const payments = await Payment.find({ loanID: loanId }).sort({ dueDate: 1 });
+    res.json(payments);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Get payment by ID
+exports.getPaymentById = async (req, res) => {
+  try {
+    const paymentId = req.params.id;
+    const userId = req.user.id;
+
+    const payment = await Payment.findById(paymentId).populate('loanID');
+    if (!payment) {
+      return res.status(404).json({ error: 'Payment not found' });
+    }
+
+    // Verify authorization
+    const loan = await Loan.findById(payment.loanID);
+    const contract = await Contract.findById(loan.contractID);
+    const isBorrower = loan.userID.equals(userId);
+    const isSponsor1 = contract?.sponsorID_1.equals(userId);
+    const isSponsor2 = contract?.sponsorID_2.equals(userId);
+
+    if (!(isBorrower || isSponsor1 || isSponsor2)) {
+      return res.status(403).json({ error: 'Unauthorized to view this payment' });
+    }
+
+    res.json(payment);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 };

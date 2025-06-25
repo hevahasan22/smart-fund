@@ -36,6 +36,9 @@ const contractSchema=new mongoose.Schema({
     priority: {
         type: Number,
         default: 3
+    },
+    approvedAt: {
+        type: Date 
     }  
   },{timestamps:true}
 )

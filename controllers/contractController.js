@@ -234,8 +234,8 @@ const processContractApproval = async (contract) => {
     const calculatePriorityScore = async (contract) => {
       let score = 0;
       
-      // 1. Loan type priority (medical > educational > personal)
-      const typeWeights = { medical: 100, educational: 50, personal: 0 };
+      // 1. Loan type priority (medical > educational > project)
+      const typeWeights = { medical: 100, educational: 50, project: 0 };
       score += typeWeights[loanTypeName] || 0;
       
       // 2. Borrower history priority (new borrowers get higher priority)
@@ -369,12 +369,45 @@ const processContractApproval = async (contract) => {
           });
           return;
         }
+
+        // 3. Check monthly approval limit (5 contracts per month)
+        const now = new Date();
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
         
-        // 3. Approve contract
+        const monthlyApprovedCount = await Contract.countDocuments({
+          status: 'approved',
+          approvedAt: { 
+            $gte: startOfMonth,
+            $lte: endOfMonth
+          }
+        });
+        
+        if (monthlyApprovedCount >= 5) {
+          updatedContract.status = 'rejected';
+          updatedContract.rejectionReason = 'Monthly approval limit reached';
+          await updatedContract.save();
+          
+          // Notify borrower
+          await User.findByIdAndUpdate(updatedContract.userID, {
+            $push: {
+              notifications: {
+                type: 'contract_rejected',
+                message: 'Contract rejected: Monthly approval limit reached',
+                contractId: updatedContract._id,
+                createdAt: new Date()
+              }
+            }
+          });
+          return;
+        }
+        
+        // 4. Approve contract
         updatedContract.status = 'approved';
+        updatedContract.approvedAt = new Date();
         await updatedContract.save();
         
-        // 4. Create loan after approval
+        // 5. Create loan after approval
         const loanController = require('./loanController');
         await loanController.createLoan(updatedContract);
 
