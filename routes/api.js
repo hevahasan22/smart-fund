@@ -13,6 +13,7 @@ const investorRoutes = require('./investor');
 const typeTermRoutes = require('./typeTerm');
 const loanTypeRoutes = require('./loanType');
 const loanTermRoutes = require('./loanTerm');
+const adminRoutes=require('./admin')
 
 // Mount routes with proper error handling
 router.use('/upload', asyncHandler(uploadRoutes));
@@ -25,6 +26,7 @@ router.use('/investors', asyncHandler(investorRoutes));
 router.use('/type-terms', asyncHandler(typeTermRoutes));
 router.use('/loan-types', asyncHandler(loanTypeRoutes));
 router.use('/loan-terms', asyncHandler(loanTermRoutes));
+router.use('/admins',asyncHandler(adminRoutes))
 
 // Export the router
 module.exports = router;
