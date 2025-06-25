@@ -12,19 +12,12 @@ const paymentSchema=new mongoose.Schema({
     },
     amount: {
         type: Number,
-        required: true,
-        min: [0.01, 'Payment amount must be at least 0.01']
-    },
-    paymentMethod:
-    {
-        type:String,
-        enum: ['credit_card', 'bank_transfer', 'cash', null],
-        default: null
+        required: true
     },
     statues:
     {
         type: String, 
-        enum: ['pending', 'completed', 'overdue'], 
+        enum: ['pending', 'paid', 'late'], 
         default: 'pending'
     },
     loanID:

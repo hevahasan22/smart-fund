@@ -1,7 +1,8 @@
 require('dotenv').config();
 const express=require('express');
 const mongoose  = require('mongoose');
-const cors= require('cors')
+const cors= require('cors');
+const paymentController = require('./controllers/paymentController');
 const app=express();
 
 
@@ -13,6 +14,8 @@ mongoose.connect(process.env.MONGO_URI)
 .catch((err)=>{
     console.log('Failed to connect to MongoDB:', err)
 })
+
+paymentController.initScheduler();
 
 //  Middlewares
 app.use(cors());
