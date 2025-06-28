@@ -127,6 +127,11 @@ const userSchema = new mongoose.Schema(
     verificationCodeExpires: {
       type: Date,
     },
+    isActive: {
+    type: Boolean,
+    default: true, // Users are active by default
+}
+
   },
   {
     timestamps: true,

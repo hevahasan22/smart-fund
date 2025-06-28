@@ -19,7 +19,11 @@ const authenticate = async (req, res, next) => {
       return res.status(401).json({ error: 'Invalid token payload' });
     }
 
-    const user = await User.findById(decoded.id);
+    const user = await User.findById({
+    _id: decoded.id,
+    'tokens.token': token,
+    isActive: true // Add this check
+    });
     if (!user) {
       return res.status(401).json({ error: 'User not found or token invalid' });
     }
