@@ -126,8 +126,8 @@ contractSchema.post('findOneAndDelete', async function(doc) {
   }
 });
 
-const contractModel=mongoose.model('contract',contractSchema)
+const Contract=mongoose.model('Contract',contractSchema)
 
 module.exports={
-  contractModel
+  Contract
 }

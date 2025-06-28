@@ -106,7 +106,7 @@ exports.resendOtp = async (req, res) => {
 
     // Generate new OTP
     const verificationCode = generateVerificationCode();
-    const verificationCodeExpires = new Date(Date.now() + 10 * 60 * 1000);
+    const verificationCodeExpires = new Date(Date.now() + 15 * 60 * 1000);
 
     // Update user
     user.verificationCode = verificationCode;
@@ -162,9 +162,8 @@ exports.login = async (req, res) => {
     }
 
     // Generate JWT
-    const token = jwt.sign({ userId: user._id, role: user.role }, process.env.JWT_SECRET, {
-      expiresIn: '1h',
-    });
+   const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET);
+
 
     res.json({
       success: true,
@@ -216,9 +215,8 @@ exports.verifyEmail = async (req, res) => {
     await user.save();
 
     // Generate JWT
-    const token = jwt.sign({ userId: user._id, role: user.role }, process.env.JWT_SECRET, {
-      expiresIn: '1h',
-    });
+    const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET);
+
 
     res.json({
       success: true,

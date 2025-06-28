@@ -84,7 +84,7 @@ const userSchema = new mongoose.Schema(
     },
     status: {
       type:String,
-      enum: ['eligible', 'max_sponsors_reached'], 
+      enum: ['eligible', 'max_sponsors_reached','inactive'], 
       default: 'eligible'
     },
     role: {
