@@ -40,8 +40,8 @@ paymentSchema.pre('save', function(next) {
   next();
 });
 
-const paymentModel=mongoose.model('payment',paymentSchema)
+const Payment=mongoose.model('Payment',paymentSchema)
 
 module.exports={
-  paymentModel
+  Payment
 }

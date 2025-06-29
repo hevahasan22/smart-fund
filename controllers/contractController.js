@@ -1,6 +1,4 @@
-const Contract = require('../models/contract');
-const User = require('../models/user');
-const Loan = require('../models/loan');
+const { User, Contract, Loan } = require('../models/index');
 const TypeTerm = require('../models/typeterm');
 const AdditionalDocument = require('../models/additionalDocument');
 const AdditionalDocumentType = require('../models/additionalDocumentType');
