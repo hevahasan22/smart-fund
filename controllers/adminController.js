@@ -1,4 +1,4 @@
-const { User, Contract, Payment, Investor, LoanType, LoanTerm } = require('../models');
+const { User, Contract, Payment, Investor, LoanType, LoanTerm } = require('../models/index');
 
 // Get all active users
 exports.getAllUsers = async (req, res) => {
