@@ -1,9 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const loanTypeController = require('../controllers/loanTypeController');
-const {requireAdmin,authorizeUserOrAdmin} = require('../middleware/auth');
+const { authenticate, requireAdmin } = require('../middleware/auth');
 
-router.post('/', requireAdmin, loanTypeController.createLoanType);
-router.get('/', requireAdmin, authorizeUserOrAdmin, loanTypeController.getLoanTypes);
+// Public routes
+router.get('/', loanTypeController.getAllLoanTypes);
+router.get('/:id', loanTypeController.getLoanTypeById);
+
+// Admin routes
+router.post('/create', authenticate, requireAdmin, loanTypeController.createLoanType);
+router.put('/:id', authenticate, requireAdmin, loanTypeController.updateLoanType);
+router.delete('/:id', authenticate, requireAdmin, loanTypeController.deleteLoanType);
 
 module.exports = router;

@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const User = require('../models/user');
+const {User} = require('../models/user');
 const Loan = require('../models/loan');
 const Contract = require('../models/contract');
 
@@ -23,7 +23,7 @@ const authenticate = async (req, res, next) => {
     // 3. Find user with valid token
     const user = await User.findOne({
       _id: decoded.id,
-      'tokens.token': token  // Check token is still valid
+      'tokens.token': token
     });
     
     if (!user) {

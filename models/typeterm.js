@@ -22,7 +22,7 @@ const typetermSchema=new mongoose.Schema({
 
 // Ensure unique combination of loan type and term
 typetermSchema.index(
-  { loanType: 1, loanTerm: 1 }, 
+  { loanTypeID: 1, loanTermID: 1 }, 
   { unique: true }
 );
 

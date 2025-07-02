@@ -1,9 +1,15 @@
 const express = require('express');
 const router = express.Router();
 const loanTermController = require('../controllers/loanTermController');
-const {authorizeUserOrAdmin,requireAdmin} = require('../middleware/auth');
+const { authenticate, requireAdmin } = require('../middleware/auth');
 
-router.post('/', requireAdmin, loanTermController.createLoanTerm);
-router.get('/',requireAdmin,authorizeUserOrAdmin, loanTermController.getLoanTerms);
+// Public routes
+router.get('/', loanTermController.getAllLoanTerms);
+router.get('/:id', loanTermController.getLoanTermById);
+
+// Admin routes
+router.post('/', authenticate, requireAdmin, loanTermController.createLoanTerm);
+router.put('/:id', authenticate, requireAdmin, loanTermController.updateLoanTerm);
+router.delete('/:id', authenticate, requireAdmin, loanTermController.deleteLoanTerm);
 
 module.exports = router;
