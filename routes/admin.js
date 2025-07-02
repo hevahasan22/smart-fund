@@ -1,40 +1,26 @@
 const express = require('express');
-     const router = express.Router();
-     const adminController = require('../controllers/adminController');
-     const { requireAdmin } = require('../middleware/auth'); // Destructure correct middleware
+const router = express.Router();
+const adminController = require('../controllers/adminController');
+const { authenticate, requireAdmin } = require('../middleware/auth');
 
-    
-     // Get all users with their details
-     router.get('/users', requireAdmin, adminController.getAllUsers);
+// User Management
+router.get('/users', authenticate, requireAdmin, adminController.getAllUsers);
+router.get('/users/:userId', authenticate, requireAdmin, adminController.getUserDetails);
+router.delete('/users/:userId', authenticate, requireAdmin, adminController.deleteUser);
+router.put('/users/:userId/reactivate', authenticate, requireAdmin, adminController.reactivateUser);
 
-     // Get specific user details including contracts and payment schedule
-     router.get('/users/:userId', requireAdmin, adminController.getUserDetails);
+// Contract Management
+router.get('/contracts/:contractId/review', authenticate, requireAdmin, adminController.reviewContract);
+router.put('/contracts/:contractId/status', authenticate, requireAdmin, adminController.updateContractStatus);
 
-     // Delete a user
-     router.delete('/users/:userId', requireAdmin, adminController.deleteUser);
+// Investor Management
+router.post('/investors', authenticate, requireAdmin, adminController.addInvestor);
+router.get('/investors', authenticate, requireAdmin, adminController.getAllInvestors);
 
-     // Review contract before approval
-     router.get('/contracts/:contractId/review', requireAdmin, adminController.reviewContract);
+// Loan Configuration
+router.post('/loan-types', authenticate, requireAdmin, adminController.addLoanType);
+router.put('/loan-types/:typeId', authenticate, requireAdmin, adminController.updateLoanType);
+router.post('/loan-terms', authenticate, requireAdmin, adminController.addLoanTerm);
+router.put('/loan-terms/:termId', authenticate, requireAdmin, adminController.updateLoanTerm);
 
-     // Approve or reject contract
-     router.put('/contracts/:contractId/status', requireAdmin, adminController.updateContractStatus);
-
-     // Add new investor
-     router.post('/investors', requireAdmin, adminController.addInvestor);
-
-     // Get all investors
-     router.get('/investors', requireAdmin, adminController.getAllInvestors);
-
-     // // Add new loan type
-     // router.post('/loan-types', verifyTokenAndAdmin, adminController.addLoanType);
-
-     // // Update loan type
-     // router.put('/loan-types/:typeId', verifyTokenAndAdmin, adminController.updateLoanType);
-
-     // // Add new loan term
-     // router.post('/loan-terms', verifyTokenAndAdmin, adminController.addLoanTerm);
-
-     // // Update loan term
-     // router.put('/loan-terms/:termId', verifyTokenAndAdmin, adminController.updateLoanTerm);
-
-     module.exports = router;
+module.exports = router;

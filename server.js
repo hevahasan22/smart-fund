@@ -5,6 +5,7 @@ const cors= require('cors');
 const paymentController = require('./controllers/paymentController');
 const app=express();
 
+require('./models/index')
 
 //  Database Connection
 mongoose.connect(process.env.MONGO_URI)
