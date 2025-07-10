@@ -1,9 +1,10 @@
 const express = require('express');
 const router = express.Router();
 const loanTypeController = require('../controllers/loanTypeController');
-const {requireAdmin,authorizeUserOrAdmin} = require('../middleware/auth');
+const { authenticate, requireAdmin } = require('../middleware/auth');
 
-router.post('/', requireAdmin, loanTypeController.createLoanType);
-router.get('/', requireAdmin, authorizeUserOrAdmin, loanTypeController.getLoanTypes);
+// Public routes
+router.get('/', loanTypeController.getAllLoanTypes);
+router.get('/:id', loanTypeController.getLoanTypeById);
 
 module.exports = router;

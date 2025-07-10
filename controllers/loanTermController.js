@@ -1,15 +1,27 @@
-const { LoanTerm, validateLoanTerm } = require('../models/loanTerm');
+const { loanTermModel } = require('../models/loanTerm');
 
-exports.createLoanTerm = async (req, res) => {
-  const { error } = validateLoanTerm(req.body);
-  if (error) return res.status(400).send(error.details[0].message);
-
-  const loanTerm = new LoanTerm(req.body);
-  await loanTerm.save();
-  res.send(loanTerm);
+// Get all loan terms
+exports.getAllLoanTerms = async (req, res) => {
+  try {
+    const loanTerms = await loanTermModel.find();
+    res.json(loanTerms);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 };
 
-exports.getLoanTerms = async (req, res) => {
-  const loanTerms = await LoanTerm.find();
-  res.send(loanTerms);
+// Get a single Loan Term by ID
+exports.getLoanTermById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const loanTerm = await loanTermModel.findById(id);
+    
+    if (!loanTerm) {
+      return res.status(404).json({ error: 'Loan term not found' });
+    }
+    
+    res.json(loanTerm);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 };

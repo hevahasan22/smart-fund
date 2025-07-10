@@ -1,15 +1,27 @@
-const { LoanType, validateLoanType } = require('../models/loanType')
+const { loanTypeModel } = require('../models/loanType');
 
-exports.createLoanType = async (req, res) => {
-  const { error } = validateLoanType(req.body);
-  if (error) return res.status(400).send(error.details[0].message);
-
-  const loanType = new LoanType(req.body);
-  await loanType.save();
-  res.send(loanType);
+// Get all loan types
+exports.getAllLoanTypes = async (req, res) => {
+  try {
+    const loanTypes = await loanTypeModel.find();
+    res.json(loanTypes);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 };
 
-exports.getLoanTypes = async (req, res) => {
-  const loanTypes = await LoanType.find();
-  res.send(loanTypes);
+// Get a single Loan Type by ID
+exports.getLoanTypeById = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const loanType = await loanTypeModel.findById(id);
+    
+    if (!loanType) {
+      return res.status(404).json({ error: 'Loan type not found' });
+    }
+    
+    res.json(loanType);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 };

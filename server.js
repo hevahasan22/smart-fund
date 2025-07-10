@@ -35,6 +35,11 @@ app.use('/api',apiRoutes)
 // require middleware
 const errorHandler=require('./middleware/errorHandler')
 app.use(errorHandler)
+app.use((req, res, next) => {
+  console.log('Incoming Headers:', req.headers);
+  console.log('Authorization Header:', req.headers.authorization);
+  next();
+});
 
 
 //  Server
