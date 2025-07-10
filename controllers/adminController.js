@@ -1,7 +1,7 @@
 const { User, Contract, Payment, Investor } = require('../models/index');
 const { loanTypeModel } = require('../models/loanType');
 const { loanTermModel } = require('../models/loanTerm');
-const { typetermModel } = require('../models/typeterm');
+const { typetermModel,validateTypeTerm } = require('../models/typeterm');
 
 // Get all active users
 exports.getAllUsers = async (req, res) => {
@@ -361,6 +361,24 @@ exports.deleteLoanTerm = async (req, res) => {
 exports.createTypeTerm = async (req, res) => {
   try {
     const { name, loanTypeID, loanTermID, interestRate } = req.body;
+
+    // Validate input with Joi
+    const { error } = validateTypeTerm(req.body);
+    if (error) {
+      return res.status(400).json({ error: error.details[0].message });
+    }
+
+    // Check for existing combination (manual validation)
+    const existing = await typetermModel.findOne({ 
+      loanTypeID, 
+      loanTermID 
+    });
+    
+    if (existing) {
+      return res.status(400).json({
+        error: 'This loan type and term combination already exists'
+      });
+    }
     
     // Verify loan type and term exist
     const [loanType, loanTerm] = await Promise.all([
@@ -391,6 +409,29 @@ exports.updateTypeTerm = async (req, res) => {
   try {
     const { id } = req.params;
     const updates = req.body;
+
+    // Validate input with Joi
+    if (updates.loanTypeID || updates.loanTermID) {
+      const { error } = validateTypeTerm(updates);
+      if (error) {
+        return res.status(400).json({ error: error.details[0].message });
+      }
+    }
+    
+    // If changing type/term, check for existing combination
+    if (updates.loanTypeID || updates.loanTermID) {
+      const existing = await typetermModel.findOne({
+        loanTypeID: updates.loanTypeID,
+        loanTermID: updates.loanTermID,
+        _id: { $ne: id } // Exclude current document
+      });
+      
+      if (existing) {
+        return res.status(400).json({
+          error: 'This loan type and term combination already exists'
+        });
+      }
+    }
     
     const typeTerm = await typetermModel.findByIdAndUpdate(id, updates, {
       new: true,
