@@ -20,9 +20,12 @@ router.get('/investors', authenticate, requireAdmin, adminController.getAllInves
 // Loan Configuration
 router.post('/loan-types', authenticate, requireAdmin, adminController.createLoanType);
 router.put('/loan-types/:typeId', authenticate, requireAdmin, adminController.updateLoanType);
-router.delete('/delete-type', authenticate, requireAdmin, adminController.deleteLoanType);
+router.delete('/loan-types/:typeId', authenticate, requireAdmin, adminController.deleteLoanType);
 router.post('/loan-terms', authenticate, requireAdmin, adminController.createLoanTerm);
 router.put('/loan-terms/:termId', authenticate, requireAdmin, adminController.updateLoanTerm);
-router.delete('/delete-type', authenticate, requireAdmin, adminController.deleteLoanTerm);
+router.delete('/loan-terms/:termId', authenticate, requireAdmin, adminController.deleteLoanTerm);
+router.post('/type-terms', authenticate, requireAdmin, adminController.createTypeTerm);
+router.put('/type-terms/:typetermId', authenticate, requireAdmin, adminController.updateTypeTerm);
+router.delete('/type-terms/:typetermId', authenticate, requireAdmin, adminController.deleteTypeTerm);
 
 module.exports = router;
