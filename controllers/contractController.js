@@ -5,7 +5,7 @@ const AdditionalDocumentType = require('../models/additionalDocumentType');
 
 exports.createContract = async (req, res) => {
   try {
-    const { typeTermID, loanAmount, loanTermMonths, sponsorID_1, 
+    const { typeTermID, loanAmount, loanTermMonths, employmentStatus, sponsorID_1, 
       sponsorID_2, startDate } = req.body;
     const userId = req.user.id;
     
@@ -55,6 +55,7 @@ exports.createContract = async (req, res) => {
       typeTermID,
       loanTermMonths,
       loanAmount,
+      employmentStatus,
       startDate: startDate || new Date(),
       status: 'pending_sponsor_approval',
       priority: typeTerm.loanTypeID.priority,

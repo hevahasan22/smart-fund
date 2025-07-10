@@ -6,6 +6,10 @@ const contractSchema=new mongoose.Schema({
        enum: ['pending', 'approved', 'rejected', 'active', 'completed'], 
        default: 'pending' 
     },
+    employmentStatus: {
+      type: String,
+      enum: ['employed', 'self-employed', 'unemployed', 'student'],
+    },
     dateOfCreate: {
        type: Date, 
        default: Date.now 

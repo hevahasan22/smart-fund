@@ -65,10 +65,6 @@ const userSchema = new mongoose.Schema(
       type:String,
       enum:['female','male']
     },
-    employmentStatus: {
-      type: String,
-      enum: ['employed', 'self-employed', 'unemployed', 'student'],
-    },
     creditID: { 
       type: String, 
       required:false,
