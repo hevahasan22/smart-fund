@@ -1,6 +1,7 @@
 const { User, Contract, Payment, Investor } = require('../models/index');
 const { loanTypeModel } = require('../models/loanType');
 const { loanTermModel } = require('../models/loanTerm');
+const { typetermModel } = require('../models/typeterm');
 
 // Get all active users
 exports.getAllUsers = async (req, res) => {
@@ -359,7 +360,7 @@ exports.deleteLoanTerm = async (req, res) => {
 // Create type-term combination
 exports.createTypeTerm = async (req, res) => {
   try {
-    const { loanTypeID, loanTermID, interestRate } = req.body;
+    const { name, loanTypeID, loanTermID, interestRate } = req.body;
     
     // Verify loan type and term exist
     const [loanType, loanTerm] = await Promise.all([
@@ -372,6 +373,7 @@ exports.createTypeTerm = async (req, res) => {
     }
     
     const typeTerm = new typetermModel({
+      name,
       loanTypeID,
       loanTermID,
       interestRate

@@ -1,6 +1,10 @@
 const mongoose= require('mongoose')
 const Joi=require('joi')
 const typetermSchema=new mongoose.Schema({
+    name:{
+      type: String,
+      required:true
+    },
     loanTypeID:
     {
         type:mongoose.Schema.Types.ObjectId,
@@ -19,12 +23,6 @@ const typetermSchema=new mongoose.Schema({
         min: [0, 'Interest rate cannot be negative']
     },  
 }, { timestamps: true })
-
-// Ensure unique combination of loan type and term
-typetermSchema.index(
-  { loanTypeID: 1, loanTermID: 1 }, 
-  { unique: true }
-);
 
 const typetermModel=mongoose.model('typeterm',typetermSchema)
 
