@@ -1,4 +1,6 @@
-const { User, Contract, Payment, Investor, LoanType, LoanTerm } = require('../models/index');
+const { User, Contract, Payment, Investor } = require('../models/index');
+const { loanTypeModel } = require('../models/loanType');
+const { loanTermModel } = require('../models/loanTerm');
 
 // Get all active users
 exports.getAllUsers = async (req, res) => {
@@ -242,148 +244,114 @@ exports.getAllInvestors = async (req, res) => {
   }
 };
 
-// Add new loan type
-exports.addLoanType = async (req, res) => {
+// Create loan type
+exports.createLoanType = async (req, res) => {
   try {
-    const { name, description, requiredDocuments } = req.body;
+    const { loanName, maxAmount, minAmount, description, priority } = req.body;
     
-    if (!name) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Loan type name is required' 
-      });
-    }
-
-    const loanType = new LoanType({
-      name,
-      description: description || '',
-      requiredDocuments: requiredDocuments || []
+    const loanType = new loanTypeModel({
+      loanName,
+      maxAmount,
+      minAmount,
+      description,
+      priority
     });
-
+    
     await loanType.save();
-    res.status(201).json({ 
-      success: true, 
-      message: 'Loan type added successfully', 
-      loanType 
-    });
+    res.status(201).json(loanType);
   } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      error: 'Error adding loan type', 
-      details: error.message 
-    });
+    res.status(400).json({ error: error.message });
   }
 };
 
-// Update loan type
+// Update loan type 
 exports.updateLoanType = async (req, res) => {
   try {
-    const { name, description, requiredDocuments } = req.body;
-    const typeId = req.params.typeId;
-
-    if (!name) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Loan type name is required' 
-      });
-    }
-
-    const loanType = await LoanType.findByIdAndUpdate(
-      typeId,
-      { name, description, requiredDocuments },
-      { new: true, runValidators: true }
-    );
-
-    if (!loanType) {
-      return res.status(404).json({ 
-        success: false, 
-        error: 'Loan type not found' 
-      });
-    }
-
-    res.json({ 
-      success: true, 
-      message: 'Loan type updated successfully', 
-      loanType 
-    });
-  } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      error: 'Error updating loan type', 
-      details: error.message 
-    });
-  }
-};
-
-// Add new loan term
-exports.addLoanTerm = async (req, res) => {
-  try {
-    const { duration, interestRate, loanType } = req.body;
+    const { id } = req.params;
+    const updates = req.body;
     
-    if (!duration || !interestRate || !loanType) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Duration, interest rate, and loan type are required' 
-      });
+    const loanType = await loanTypeModel.findByIdAndUpdate(id, updates, {
+      new: true,
+      runValidators: true
+    });
+    
+    if (!loanType) {
+      return res.status(404).json({ error: 'Loan type not found' });
     }
-
-    const loanTerm = new LoanTerm({
-      duration,
-      interestRate,
-      loanType
-    });
-
-    await loanTerm.save();
-    res.status(201).json({ 
-      success: true, 
-      message: 'Loan term added successfully', 
-      loanTerm 
-    });
+    
+    res.json(loanType);
   } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      error: 'Error adding loan term', 
-      details: error.message 
-    });
+    res.status(400).json({ error: error.message });
   }
 };
 
-// Update loan term
+// Delete loan type 
+exports.deleteLoanType = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const loanType = await loanTypeModel.findByIdAndDelete(id);
+    
+    if (!loanType) {
+      return res.status(404).json({ error: 'Loan type not found' });
+    }
+    
+    res.json({ message: 'Loan type deleted' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Create loan term
+exports.createLoanTerm = async (req, res) => {
+  try {
+    const { type, maxTerm, minTerm } = req.body;
+    
+    const loanTerm = new loanTermModel({
+      type,
+      maxTerm,
+      minTerm
+    });
+    
+    await loanTerm.save();
+    res.status(201).json(loanTerm);
+  } catch (error) {
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// Update loan term 
 exports.updateLoanTerm = async (req, res) => {
   try {
-    const { duration, interestRate, loanType } = req.body;
-    const termId = req.params.termId;
-
-    if (!duration || !interestRate || !loanType) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Duration, interest rate, and loan type are required' 
-      });
-    }
-
-    const loanTerm = await LoanTerm.findByIdAndUpdate(
-      termId,
-      { duration, interestRate, loanType },
-      { new: true, runValidators: true }
-    );
-
+    const { id } = req.params;
+    const updates = req.body;
+    
+    const loanTerm = await loanTermModel.findByIdAndUpdate(id, updates, {
+      new: true,
+      runValidators: true
+    });
+    
     if (!loanTerm) {
-      return res.status(404).json({ 
-        success: false, 
-        error: 'Loan term not found' 
-      });
+      return res.status(404).json({ error: 'Loan term not found' });
     }
-
-    res.json({ 
-      success: true, 
-      message: 'Loan term updated successfully', 
-      loanTerm 
-    });
+    
+    res.json(loanTerm);
   } catch (error) {
-    res.status(500).json({ 
-      success: false, 
-      error: 'Error updating loan term', 
-      details: error.message 
-    });
+    res.status(400).json({ error: error.message });
+  }
+};
+
+// Delete loan term 
+exports.deleteLoanTerm = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const loanTerm = await loanTermModel.findByIdAndDelete(id);
+    
+    if (!loanTerm) {
+      return res.status(404).json({ error: 'Loan term not found' });
+    }
+    
+    res.json({ message: 'Loan term deleted' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 };

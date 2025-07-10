@@ -7,9 +7,4 @@ const { authenticate, requireAdmin } = require('../middleware/auth');
 router.get('/', loanTermController.getAllLoanTerms);
 router.get('/:id', loanTermController.getLoanTermById);
 
-// Admin routes
-router.post('/', authenticate, requireAdmin, loanTermController.createLoanTerm);
-router.put('/:id', authenticate, requireAdmin, loanTermController.updateLoanTerm);
-router.delete('/:id', authenticate, requireAdmin, loanTermController.deleteLoanTerm);
-
 module.exports = router;
