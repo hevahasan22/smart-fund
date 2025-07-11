@@ -17,12 +17,9 @@ exports.createLoan = async (contract) => {
     
     // Create loan
     const loan = new Loan({
-      contractID: contract._id,
       typeTermID: contract.typeTermID,
-      userID: contract.userID,
       loanAmount: contract.loanAmount,
       loanTermMonths: contract.loanTermMonths,
-      interestRate: typeTerm.interestRate,
       startDate: contract.startDate,
       endDate,
       status: 'active'

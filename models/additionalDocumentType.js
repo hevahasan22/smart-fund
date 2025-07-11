@@ -12,7 +12,7 @@ const additionalDocumentTypeSchema=mongoose.Schema({
         ref:'typeterm',
         required:true
     },
-    isRequred:
+    isRequired:
     {
         type:Boolean,
         default:true

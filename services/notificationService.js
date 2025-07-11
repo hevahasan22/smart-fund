@@ -43,3 +43,19 @@ exports.sendSponsorRequest = async (sponsor, user, loanDetails) => {
   
   await transporter.sendMail(mailOptions);
 };
+
+// Send document rejection notification
+exports.sendDocumentRejection = async (user, documentId, reason) => {
+  const mailOptions = {
+    to: user.email,
+    subject: 'Document Rejection Notice',
+    html: `
+      <p>Hello ${user.firstName},</p>
+      <p>Your document (ID: ${documentId}) has been rejected.</p>
+      <p><strong>Reason:</strong> ${reason}</p>
+      <p>Please review the requirements and re-upload the document.</p>
+    `
+  };
+  
+  await transporter.sendMail(mailOptions);
+};

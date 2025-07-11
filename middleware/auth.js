@@ -1,5 +1,5 @@
 const jwt = require('jsonwebtoken');
-const { User, Contract, Loan } = require('../models/index');
+const { User, Contract, Loan, Document } = require('../models/index');
 
 // Middleware: Authenticate user from JWT
 const authenticate = async (req, res, next) => {
@@ -101,9 +101,45 @@ const authorizeUserOrAdmin = (req, res, next) => {
   res.status(403).json({ error: 'Forbidden: Restricted to account owner or admin' });
 };
 
+// Middleware: Document access authorization
+const authorizeDocumentAccess = async (req, res, next) => {
+  try {
+    const docId = req.params.docId || req.params.id;
+    if (!docId) return next();
+
+    const document = await Document.findById(docId);
+    if (!document) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+
+    // Allow document owner, associated loan users, or admin
+    const isOwner = document.uploadedBy.equals(req.user._id);
+    const isLoanUser = document.loanID?.equals(req.user._id);
+    
+    if (!(isOwner || isLoanUser || req.user.role === 'admin')) {
+      return res.status(403).json({ error: 'Unauthorized document access' });
+    }
+
+    next();
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Contract access check helper
+const checkContractAccess = (contract, user) => {
+  const isBorrower = contract.userID.equals(user._id);
+  const isSponsor1 = contract.sponsorID_1 && contract.sponsorID_1.equals(user._id);
+  const isSponsor2 = contract.sponsorID_2 && contract.sponsorID_2.equals(user._id);
+  
+  return isBorrower || isSponsor1 || isSponsor2 || user.role === 'admin';
+};
+
 module.exports = {
   authenticate,
   requireAdmin,
   authorizeLoanAccess,
-  authorizeUserOrAdmin
+  authorizeUserOrAdmin,
+  authorizeDocumentAccess,
+  checkContractAccess
 };
