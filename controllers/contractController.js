@@ -537,8 +537,24 @@ const processContractApproval = async (contract) => {
         await updatedContract.save();
         
         // 5. Create loan after approval
-        const loanController = require('./loanController');
-        await loanController.createLoan(updatedContract);
+        const loan = new Loan({
+          loanAmount: updatedContract.loanAmount,
+          loanTermMonths: updatedContract.loanTermMonths,
+          startDate: updatedContract.startDate,
+          typeTermID: updatedContract.typeTermID,
+          status: 'active'
+        });
+        
+        // Calculate end date
+        const endDate = new Date(updatedContract.startDate);
+        endDate.setMonth(endDate.getMonth() + updatedContract.loanTermMonths);
+        loan.endDate = endDate;
+        
+        await loan.save();
+        
+        // Link loan to contract
+        updatedContract.loanID = loan._id;
+        await updatedContract.save();
 
         // 6. Notify all parties
         await Promise.all([
