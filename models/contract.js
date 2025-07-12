@@ -34,8 +34,7 @@ const contractSchema=new mongoose.Schema({
     },
     loanID: { 
         type: mongoose.Schema.Types.ObjectId, 
-        ref: 'loan',
-        required: true
+        ref: 'loan'
     },
     priority: {
         type: Number,

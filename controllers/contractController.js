@@ -1,4 +1,5 @@
-const { User, Contract,Loan } = require('../models/index');
+const { User, Contract } = require('../models/index');
+const {Loan}=require('../models/loan')
 const {loanTermModel}=require('../models/loanTerm')
 const {loanTypeModel}=require('../models/loanType')
 const {typetermModel}=require('../models/typeterm')
@@ -643,5 +644,3 @@ exports.getSponsorContracts = async (req, res) => {
   }
 };
 
-// Helper to create loan
-const createLoan = require('./loanController').createLoan; 
