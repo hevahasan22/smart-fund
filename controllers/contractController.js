@@ -22,8 +22,7 @@ exports.createContract = async (req, res) => {
       loanTermMonths, 
       employmentStatus, 
       sponsorEmail1, 
-      sponsorEmail2, 
-      startDate 
+      sponsorEmail2,
     } = body;
     
     const userId = req.user.id;
@@ -149,8 +148,8 @@ exports.createContract = async (req, res) => {
       loanAmount,
       loanTermMonths,
       employmentStatus,
-      startDate: startDate || new Date(),
-      status: 'pending_sponsor_approval',
+      startDate: new Date(),
+      status: 'pending_sponsor_approval', 
       priority: loanTypeRecord.priority
     });
 

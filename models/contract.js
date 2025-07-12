@@ -3,7 +3,7 @@ const Joi=require('joi')
 const contractSchema=new mongoose.Schema({
     status: { 
        type: String, 
-       enum: ['pending', 'approved', 'rejected', 'active', 'completed'], 
+       enum: ['pending_sponsor_approval','pending', 'approved', 'rejected', 'active', 'completed'], 
        default: 'pending' 
     },
     employmentStatus: {
