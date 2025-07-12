@@ -127,12 +127,30 @@ const authorizeDocumentAccess = async (req, res, next) => {
 };
 
 // Contract access check helper
-const checkContractAccess = (contract, user) => {
-  const isBorrower = contract.userID.equals(user._id);
-  const isSponsor1 = contract.sponsorID_1 && contract.sponsorID_1.equals(user._id);
-  const isSponsor2 = contract.sponsorID_2 && contract.sponsorID_2.equals(user._id);
-  
-  return isBorrower || isSponsor1 || isSponsor2 || user.role === 'admin';
+const checkContractAccess = async (req, res, next) => {
+  try {
+    const contractId = req.params.contractId || req.params.id;
+    if (!contractId) return next();
+
+    const contract = await Contract.findById(contractId);
+    if (!contract) {
+      return res.status(404).json({ error: 'Contract not found' });
+    }
+
+    // Allow borrower, sponsors, or admin
+    const isBorrower = contract.userID.equals(req.user._id);
+    const isSponsor1 = contract.sponsorID_1 && contract.sponsorID_1.equals(req.user._id);
+    const isSponsor2 = contract.sponsorID_2 && contract.sponsorID_2.equals(req.user._id);
+    
+    if (!(isBorrower || isSponsor1 || isSponsor2 || req.user.role === 'admin')) {
+      return res.status(403).json({ error: 'Unauthorized contract access' });
+    }
+
+    req.contract = contract; // Attach contract to request object
+    next();
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 };
 
 module.exports = {
