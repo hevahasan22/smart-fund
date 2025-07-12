@@ -59,6 +59,9 @@ contractSchema.pre('save', async function(next) {
         this.sponsorID_2.toString() === this.userID.toString()) {
       throw new Error('You cannot be your own sponsor');
     }
+
+    // Skip loan-related checks if loanID not set
+    if (!this.loanID) return next();
     
     // 3. Get loan type
     const loan = await mongoose.model('Loan').findById(this.loanID)

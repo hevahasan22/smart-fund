@@ -368,7 +368,7 @@ exports.rejectContractAsSponsor = async (req, res) => {
 const processContractApproval = async (contract) => {
   try {
      // Get loan type details
-    const typeTerm = await TypeTerm.findById(contract.typeTermID)
+    const typeTerm = await typetermModel.findById(contract.typeTermID)
       .populate('loanTypeID')
       .populate('loanTermID');
     
@@ -455,12 +455,12 @@ const processContractApproval = async (contract) => {
         if (updatedContract.status !== 'pending') return;
         
         // 1. Check all required documents are approved
-        const requiredDocTypes = await AdditionalDocumentType.find({
+        const requiredDocTypes = await additionalDocumentTypeModel.find({
           typeTermID: contract.typeTermID,
           isRequired: true
         });
         
-        const documents = await AdditionalDocument.find({ 
+        const documents = await additionalDocumentModel.find({ 
           contractID: contract._id 
         });
         
@@ -643,4 +643,3 @@ exports.getSponsorContracts = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
-

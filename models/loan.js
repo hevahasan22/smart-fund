@@ -89,7 +89,7 @@ loanSchema.methods.getInterestRate = async function() {
   return typeTerm.interestRate;
 };
 
-const Loan=mongoose.model('loan',loanSchema)
+const Loan=mongoose.model('Loan',loanSchema)
 
 module.exports={
   Loan
