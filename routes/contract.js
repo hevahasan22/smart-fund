@@ -25,19 +25,22 @@ const express = require('express');
        authenticate,
        contractController.getSponsorContracts
      );
+
+     // Sponsor approves a contract
+     router.post(
+       '/:contractId/approve',
+       authenticate,
+       contractController.approveContractAsSponsor
+     );
+
+     // Sponsor rejects a contract
+     router.post(
+       '/:contractId/reject',
+       authenticate,
+       contractController.rejectContractAsSponsor
+     );
     /*
-     // Admin routes
-     router.get('/admin/all', 
-      authenticate, 
-      requireAdmin, 
-      contractController.getAllContracts
-    );
-     
-     router.get('/admin/user/:userId', 
-      authenticate, 
-      requireAdmin, 
-      contractController.getUserContractsAdmin
-    );
+ 
     */
 
      module.exports = router;

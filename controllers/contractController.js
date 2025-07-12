@@ -1,25 +1,13 @@
-const { User, Contract, TypeTerm, AdditionalDocument, AdditionalDocumentType, Loan } = require('../models/index');
-const cloudinary = require('cloudinary').v2;
-const multer = require('multer');
-const { loanTypeModel } = require('../models/loanType');
-const { loanTermModel } = require('../models/loanTerm');
-const { typetermModel } = require('../models/typeterm');
-const { additionalDocumentModel } = require('../models/additionalDocument');
-const { additionalDocumentTypeModel } = require('../models/additionalDocumentType');
+const { User, Contract,Loan } = require('../models/index');
+const {loanTermModel}=require('../models/loanTerm')
+const {loanTypeModel}=require('../models/loanType')
+const {typetermModel}=require('../models/typeterm')
+const {additionalDocumentTypeModel}=require('../models/additionalDocumentType')
+const {additionalDocumentModel}=require('../models/additionalDocument')
+const cloudinary=require('../utils/cloudinary')
+const upload=require('../middleware/multer')
 const notificationService = require('../services/notificationService');
 
-// Configure Cloudinary
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET
-});
-
-// Configure Multer for file uploads
-const storage = multer.memoryStorage();
-const upload = multer({ storage }).any();
-
-exports.handleUpload = upload; // Export middleware for use in routes
 
 exports.createContract = async (req, res) => {
   try {
