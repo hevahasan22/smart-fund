@@ -1,17 +1,20 @@
-const { User, Contract } = require('../models/index');
-const {Loan}=require('../models/loan')
-const {loanTermModel}=require('../models/loanTerm')
-const {loanTypeModel}=require('../models/loanType')
-const {typetermModel}=require('../models/typeterm')
-const {additionalDocumentTypeModel}=require('../models/additionalDocumentType')
-const {additionalDocumentModel}=require('../models/additionalDocument')
+const mongoose=require('mongoose')
 const cloudinary=require('../utils/cloudinary')
 const upload=require('../middleware/multer')
 const notificationService = require('../services/notificationService');
 
 
 exports.createContract = async (req, res) => {
+
   try {
+    const { User } = require('../models/user');
+    const { Contract } = require('../models/contract')
+    const {Loan}=require('../models/loan')
+    const {loanTermModel}=require('../models/loanTerm')
+    const {loanTypeModel}=require('../models/loanType')
+    const {typetermModel}=require('../models/typeterm')
+    const {additionalDocumentTypeModel}=require('../models/additionalDocumentType')
+    const {additionalDocumentModel}=require('../models/additionalDocument')
     // Parse form data
     const files = req.files || [];
     const body = req.body;
@@ -142,6 +145,7 @@ exports.createContract = async (req, res) => {
 
     // 9. Create contract
     const contract = new Contract({
+      
       userID: userId,
       sponsorID_1: sponsor1._id,
       sponsorID_2: sponsor2._id,
@@ -195,9 +199,15 @@ exports.createContract = async (req, res) => {
     }
 
     // 11. Notify sponsors using notification service
+    const borrower = await User.findById(userId);
+    const loanDetails = {
+      type: loanTypeRecord.loanName,
+      amount: loanAmount,
+      term: `${loanTermMonths} months`
+    };
     await Promise.all([
-      notificationService.sendSponsorRequest(sponsor1._id, userId, contract._id),
-      notificationService.sendSponsorRequest(sponsor2._id, userId, contract._id)
+      notificationService.sendSponsorRequest(sponsor1, borrower, loanDetails),
+      notificationService.sendSponsorRequest(sponsor2, borrower, loanDetails)
     ]);
     
     // 10. Start approval process
@@ -252,6 +262,14 @@ async function getValidTypeTermCombinations() {
 
 // Sponsor approval endpoint
 exports.approveContractAsSponsor = async (req, res) => {
+  const { User } = require('../models/user');
+const { Contract } = require('../models/contract')
+const {Loan}=require('../models/loan')
+const {loanTermModel}=require('../models/loanTerm')
+const {loanTypeModel}=require('../models/loanType')
+const {typetermModel}=require('../models/typeterm')
+const {additionalDocumentTypeModel}=require('../models/additionalDocumentType')
+const {additionalDocumentModel}=require('../models/additionalDocument')
   try {
     const { contractId } = req.params;
     const sponsorId = req.user.id;
@@ -311,7 +329,16 @@ exports.approveContractAsSponsor = async (req, res) => {
 
 // Sponsor rejection endpoint
 exports.rejectContractAsSponsor = async (req, res) => {
+
   try {
+      const { User } = require('../models/user');
+      const { Contract } = require('../models/contract')
+      const {Loan}=require('../models/loan')
+      const {loanTermModel}=require('../models/loanTerm')
+      const {loanTypeModel}=require('../models/loanType')
+      const {typetermModel}=require('../models/typeterm')
+      const {additionalDocumentTypeModel}=require('../models/additionalDocumentType')
+      const {additionalDocumentModel}=require('../models/additionalDocument')
     const { contractId } = req.params;
     const sponsorId = req.user.id;
     const { reason } = req.body; // Get rejection reason from request body
@@ -601,7 +628,16 @@ async function rejectContract(contract, reason, details = '') {
 
 // Get all user contracts
 exports.getUserContracts = async (req, res) => {
+
   try {
+      const { User } = require('../models/user');
+      const { Contract } = require('../models/contract')
+      const {Loan}=require('../models/loan')
+      const {loanTermModel}=require('../models/loanTerm')
+      const {loanTypeModel}=require('../models/loanType')
+      const {typetermModel}=require('../models/typeterm')
+      const {additionalDocumentTypeModel}=require('../models/additionalDocumentType')
+      const {additionalDocumentModel}=require('../models/additionalDocument')
     const contracts = await Contract.find({ userID: req.user.id })
       .populate('sponsorID_1', 'firstName lastName') // Sponsor 1 info
       .populate('sponsorID_2', 'firstName lastName') // Sponsor 2 info

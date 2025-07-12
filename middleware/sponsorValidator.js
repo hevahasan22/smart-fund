@@ -1,5 +1,5 @@
 // middlewares/sponsorValidator.js
-const Contract = require('../models/contract');
+const { Contract } = require('../models/contract');
 const Loan = require('../models/loan');
 const Sponsor=require('../models/user')
 

@@ -1,5 +1,5 @@
 const User = require('../models/user');
-const Contract = require('../models/contract');
+const { Contract } = require('../models/contract');
 const TypeTerm = require('../models/typeterm');
 
 exports.createSponsor = async (req, res) => {

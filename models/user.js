@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const Schema = mongoose.Schema;
 const Joi = require('joi');
+const { Contract } = require('./contract');
 
 // User Schema
 const userSchema = new mongoose.Schema(
