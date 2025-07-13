@@ -3,7 +3,7 @@ const Joi=require('joi')
 const contractSchema=new mongoose.Schema({
     status: { 
        type: String, 
-       enum: ['pending_sponsor_approval','pending', 'approved', 'rejected', 'active', 'completed'], 
+       enum: ['pending_sponsor_approval', 'pending', 'pending_processing', 'approved', 'rejected', 'active', 'completed'], 
        default: 'pending' 
     },
     employmentStatus: {
@@ -31,6 +31,35 @@ const contractSchema=new mongoose.Schema({
         type:mongoose.Schema.Types.ObjectId,
         ref:'user',
         required:true
+    },
+    typeTermID: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'typeterm',
+        required: true
+    },
+    // Temporary loan details - will be moved to loan model after approval
+    tempLoanAmount: {
+        type: Number,
+        required: true
+    },
+    tempLoanTermMonths: {
+        type: Number,
+        required: true
+    },
+    tempStartDate: {
+        type: Date,
+        default: Date.now
+    },
+    sponsor1Approved: {
+        type: Boolean,
+        default: false
+    },
+    sponsor2Approved: {
+        type: Boolean,
+        default: false
+    },
+    rejectionReason: {
+        type: String
     },
     loanID: { 
         type: mongoose.Schema.Types.ObjectId, 

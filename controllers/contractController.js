@@ -1,20 +1,20 @@
-const mongoose=require('mongoose')
-const cloudinary=require('../utils/cloudinary')
-const upload=require('../middleware/multer')
+const mongoose = require('mongoose');
+const cloudinary = require('../utils/cloudinary');
+const upload = require('../middleware/multer');
 const notificationService = require('../services/notificationService');
 
+// Import all models at the top
+const { User } = require('../models/user');
+const { Contract } = require('../models/contract');
+const { Loan } = require('../models/loan');
+const { loanTermModel } = require('../models/loanTerm');
+const { loanTypeModel } = require('../models/loanType');
+const { typetermModel } = require('../models/typeterm');
+const { additionalDocumentTypeModel } = require('../models/additionalDocumentType');
+const { additionalDocumentModel } = require('../models/additionalDocument');
 
 exports.createContract = async (req, res) => {
-
   try {
-    const { User } = require('../models/user');
-    const { Contract } = require('../models/contract')
-    const {Loan}=require('../models/loan')
-    const {loanTermModel}=require('../models/loanTerm')
-    const {loanTypeModel}=require('../models/loanType')
-    const {typetermModel}=require('../models/typeterm')
-    const {additionalDocumentTypeModel}=require('../models/additionalDocumentType')
-    const {additionalDocumentModel}=require('../models/additionalDocument')
     // Parse form data
     const files = req.files || [];
     const body = req.body;
@@ -30,6 +30,40 @@ exports.createContract = async (req, res) => {
     } = body;
     
     const userId = req.user.id;
+
+    // Input validation
+    if (!loanType || !loanTerm || !loanAmount || !loanTermMonths || !employmentStatus || !sponsorEmail1 || !sponsorEmail2) {
+      return res.status(400).json({ 
+        error: 'Missing required fields',
+        required: ['loanType', 'loanTerm', 'loanAmount', 'loanTermMonths', 'employmentStatus', 'sponsorEmail1', 'sponsorEmail2']
+      });
+    }
+
+    // Validate numeric fields
+    if (isNaN(loanAmount) || loanAmount <= 0) {
+      return res.status(400).json({ error: 'Invalid loan amount' });
+    }
+
+    if (isNaN(loanTermMonths) || loanTermMonths <= 0) {
+      return res.status(400).json({ error: 'Invalid loan term months' });
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(sponsorEmail1) || !emailRegex.test(sponsorEmail2)) {
+      return res.status(400).json({ error: 'Invalid email format for sponsors' });
+    }
+
+    // Check if sponsors are the same
+    if (sponsorEmail1 === sponsorEmail2) {
+      return res.status(400).json({ error: 'Sponsors must be different individuals' });
+    }
+
+    // Check if user is trying to sponsor themselves
+    const user = await User.findById(userId);
+    if (user.email === sponsorEmail1 || user.email === sponsorEmail2) {
+      return res.status(400).json({ error: 'You cannot be your own sponsor' });
+    }
 
     // 1. Find loan type by name
     const loanTypeRecord = await loanTypeModel.findOne({ loanName: loanType });
@@ -145,15 +179,14 @@ exports.createContract = async (req, res) => {
 
     // 9. Create contract
     const contract = new Contract({
-      
       userID: userId,
       sponsorID_1: sponsor1._id,
       sponsorID_2: sponsor2._id,
       typeTermID: typeTerm._id,
-      loanAmount,
-      loanTermMonths,
+      tempLoanAmount: loanAmount,
+      tempLoanTermMonths: loanTermMonths,
+      tempStartDate: new Date(),
       employmentStatus,
-      startDate: new Date(),
       status: 'pending_sponsor_approval', 
       priority: loanTypeRecord.priority
     });
@@ -205,7 +238,30 @@ exports.createContract = async (req, res) => {
       amount: loanAmount,
       term: `${loanTermMonths} months`
     };
+
+    // Add contract to sponsors' pending approvals and send notifications
     await Promise.all([
+      // Add to sponsor1's pending approvals
+      User.findByIdAndUpdate(sponsor1._id, {
+        $push: {
+          pendingApprovals: {
+            contractId: contract._id,
+            borrowerId: userId,
+            requestedAt: new Date()
+          }
+        }
+      }),
+      // Add to sponsor2's pending approvals
+      User.findByIdAndUpdate(sponsor2._id, {
+        $push: {
+          pendingApprovals: {
+            contractId: contract._id,
+            borrowerId: userId,
+            requestedAt: new Date()
+          }
+        }
+      }),
+      // Send dual notifications (in-app + email) to both sponsors
       notificationService.sendSponsorRequest(sponsor1, borrower, loanDetails),
       notificationService.sendSponsorRequest(sponsor2, borrower, loanDetails)
     ]);
@@ -262,14 +318,6 @@ async function getValidTypeTermCombinations() {
 
 // Sponsor approval endpoint
 exports.approveContractAsSponsor = async (req, res) => {
-  const { User } = require('../models/user');
-const { Contract } = require('../models/contract')
-const {Loan}=require('../models/loan')
-const {loanTermModel}=require('../models/loanTerm')
-const {loanTypeModel}=require('../models/loanType')
-const {typetermModel}=require('../models/typeterm')
-const {additionalDocumentTypeModel}=require('../models/additionalDocumentType')
-const {additionalDocumentModel}=require('../models/additionalDocument')
   try {
     const { contractId } = req.params;
     const sponsorId = req.user.id;
@@ -288,6 +336,11 @@ const {additionalDocumentModel}=require('../models/additionalDocument')
       return res.status(403).json({ error: 'You are not a sponsor for this contract' });
     }
     
+    // Check if already approved
+    if ((isSponsor1 && contract.sponsor1Approved) || (isSponsor2 && contract.sponsor2Approved)) {
+      return res.status(400).json({ error: 'You have already approved this contract' });
+    }
+    
     // Update approval status
     if (isSponsor1) {
       contract.sponsor1Approved = true;
@@ -300,21 +353,28 @@ const {additionalDocumentModel}=require('../models/additionalDocument')
       $pull: { pendingApprovals: { contractId: contract._id } }
     });
     
+    // Send approval notification to the sponsor
+    await notificationService.sendSponsorApprovalNotification(sponsorId, contract._id, true);
+    
     // Check if both approved
     if (contract.sponsor1Approved && contract.sponsor2Approved) {
-      contract.status = 'pending'; // Move to next approval stage
+      contract.status = 'pending_processing'; // Move to processing stage
       await contract.save();
-      processContractApproval(contract); // Start approval process
+      
+      // Send processing notification to borrower
+      await notificationService.sendContractProcessingNotification(contract.userID, contract._id);
+      
+      // Start approval process
+      processContractApproval(contract);
     } else {
       await contract.save();
 
-      // Notify other sponsor
+      // Notify other sponsor about the approval
       const otherSponsorId = isSponsor1 ? contract.sponsorID_2 : contract.sponsorID_1;
-      await notificationService.sendNotification(
-        otherSponsorId,
-        'sponsor_approved',
-        `Your co-sponsor has approved contract ${contractId}`
-      );
+      await notificationService.sendSponsorApprovalNotification(otherSponsorId, contract._id, false);
+      
+      // Notify borrower about partial approval
+      await notificationService.sendPartialApprovalNotification(contract.userID, contract._id);
     }
     
     res.json({ 
@@ -329,16 +389,7 @@ const {additionalDocumentModel}=require('../models/additionalDocument')
 
 // Sponsor rejection endpoint
 exports.rejectContractAsSponsor = async (req, res) => {
-
   try {
-      const { User } = require('../models/user');
-      const { Contract } = require('../models/contract')
-      const {Loan}=require('../models/loan')
-      const {loanTermModel}=require('../models/loanTerm')
-      const {loanTypeModel}=require('../models/loanType')
-      const {typetermModel}=require('../models/typeterm')
-      const {additionalDocumentTypeModel}=require('../models/additionalDocumentType')
-      const {additionalDocumentModel}=require('../models/additionalDocument')
     const { contractId } = req.params;
     const sponsorId = req.user.id;
     const { reason } = req.body; // Get rejection reason from request body
@@ -370,19 +421,19 @@ exports.rejectContractAsSponsor = async (req, res) => {
       })
     ]);
     
-    // Notify borrower and other sponsor
+    // Send rejection notifications to all parties
     await Promise.all([
-      notificationService.sendContractUpdate(
-        contract.userID, 
-        contract._id, 
-        'rejected', 
-        contract.rejectionReason
-      ),
-      notificationService.sendNotification(
+      // Notify the rejecting sponsor
+      notificationService.sendContractRejectionNotification(sponsorId, contract._id, reason, true),
+      // Notify the other sponsor
+      notificationService.sendContractRejectionNotification(
         contract.sponsorID_1.equals(sponsorId) ? contract.sponsorID_2 : contract.sponsorID_1,
-        'contract_rejected',
-        `Contract rejected by co-sponsor: ${contract.rejectionReason}`
-      )
+        contract._id,
+        `Rejected by co-sponsor: ${reason || 'No reason provided'}`,
+        false
+      ),
+      // Notify the borrower
+      notificationService.sendContractRejectionNotification(contract.userID, contract._id, reason, false)
     ]);
     
     res.json({ message: 'Contract rejected', contract });
@@ -391,10 +442,10 @@ exports.rejectContractAsSponsor = async (req, res) => {
   }
 };
 
-// Approval processing logic
+// Approval processing logic - improved version
 const processContractApproval = async (contract) => {
   try {
-     // Get loan type details
+    // Get loan type details
     const typeTerm = await typetermModel.findById(contract.typeTermID)
       .populate('loanTypeID')
       .populate('loanTermID');
@@ -407,208 +458,185 @@ const processContractApproval = async (contract) => {
     
     const loanTypeName = typeTerm.loanTypeID.loanName.toLowerCase();
     
-    // Base priority delays
-    const basePriorityDelays = {
-      medical: 5000,    // 5 seconds
-      educational: 10000, // 10 seconds
-      project: 15000    // 15 seconds
-    };
+    // Calculate priority score
+    const priorityScore = await calculatePriorityScore(contract, loanTypeName);
     
-    // Calculate enhanced priority score
-    const calculatePriorityScore = async (contract) => {
-      let score = 0;
-      
-      // 1. Loan type priority (medical > educational > project)
-      const typeWeights = { medical: 100, educational: 50, project: 0 };
-      score += typeWeights[loanTypeName] || 0;
-      
-      // 2. Borrower history priority (new borrowers get higher priority)
-      const previousLoans = await Contract.countDocuments({
-        userID: contract.userID,
-        status: 'approved'
-      });
-      score += previousLoans === 0 ? 75 : 0;
-      
-      // 3. Application date priority (earlier applications get higher priority)
-      // Calculate as inverse of time since application (more recent = lower score)
-      const timeDiff = new Date() - contract.createdAt;
-      const hoursSinceApplication = timeDiff / (1000 * 60 * 60);
-      score += Math.max(0, 50 - (hoursSinceApplication * 2));
-      
-      return score;
-    };
-    
-    // Calculate priority score for this contract
-    const priorityScore = await calculatePriorityScore(contract);
-    
-    // Get all pending contracts to determine relative priority
-    const pendingContracts = await Contract.find({
-      status: 'pending',
-      _id: { $ne: contract._id } // Exclude current contract
-    }).populate({
-      path: 'typeTermID',
-      populate: { path: 'loanTypeID' }
+    // Update contract with priority score for processing
+    await Contract.findByIdAndUpdate(contract._id, {
+      priority: priorityScore,
+      status: 'pending_processing'
     });
     
-    // Calculate scores for all pending contracts
-    const pendingScores = await Promise.all(
-      pendingContracts.map(async (c) => ({
-        contract: c,
-        score: await calculatePriorityScore(c)
-      }))
-    );
+    // Process immediately if no other pending contracts
+    await processPendingContracts();
     
-    // Find how many contracts have higher priority
-    const higherPriorityCount = pendingScores.filter(
-      ps => ps.score > priorityScore
-    ).length;
-    
-    // Calculate delay based on:
-    // 1. Base delay for loan type
-    // 2. Number of higher priority contracts (each adds 5 seconds)
-    const baseDelay = basePriorityDelays[loanTypeName] || 15000;
-    const priorityDelay = higherPriorityCount * 5000;
-    const totalDelay = baseDelay + priorityDelay;
-    
-    console.log(`Processing contract ${contract._id} with delay: ${totalDelay}ms, ` +
-               `Priority score: ${priorityScore}, ` +
-               `Higher priority contracts: ${higherPriorityCount}`);
-    
-    setTimeout(async () => {
-      try {
-        const updatedContract = await Contract.findById(contract._id);
-        
-        // Skip if already processed
-        if (updatedContract.status !== 'pending') return;
-        
-        // 1. Check all required documents are approved
-        const requiredDocTypes = await additionalDocumentTypeModel.find({
-          typeTermID: contract.typeTermID,
-          isRequired: true
-        });
-        
-        const documents = await additionalDocumentModel.find({ 
-          contractID: contract._id 
-        });
-        
-        // Check if all required documents are uploaded and approved
-        const allApproved = requiredDocTypes.every(docType => 
-          documents.some(doc => 
-            doc.typeID.equals(docType._id) && doc.status === 'approved'
-          )
-        );
-        
-        if (!allApproved) {
-          await rejectContract(
-            updatedContract, 
-            'Missing required documents',
-            'Please ensure all required documents are uploaded and approved'
-          );
-          return;
-        }
-        
-        // 2. Check sponsor availability
-        const [sponsor1Count, sponsor2Count] = await Promise.all([
-          Contract.countDocuments({
-            $or: [
-              { sponsorID_1: contract.sponsorID_1 }, 
-              { sponsorID_2: contract.sponsorID_1 }
-            ],
-            status: 'approved',
-            'typeTermID.loanTypeID': typeTerm.loanTypeID._id
-          }),
-          Contract.countDocuments({
-            $or: [
-              { sponsorID_1: contract.sponsorID_2 }, 
-              { sponsorID_2: contract.sponsorID_2 }
-            ],
-            status: 'approved',
-            'typeTermID.loanTypeID': typeTerm.loanTypeID._id
-          })
-        ]);
-        
-        if (sponsor1Count >= 2 || sponsor2Count >= 2) {
-          await rejectContract(
-            updatedContract, 
-            'Sponsor unavailable',
-            'One or both sponsors have reached their guarantee limit'
-          );
-          return;
-        }
-
-        // 3. Check monthly approval limit (5 contracts per month)
-        const now = new Date();
-        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
-        const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
-        
-        const monthlyApprovedCount = await Contract.countDocuments({
-          status: 'approved',
-          approvedAt: { 
-            $gte: startOfMonth,
-            $lte: endOfMonth
-          }
-        });
-        
-        if (monthlyApprovedCount >= 5) {
-          await rejectContract(
-            updatedContract, 
-            'Monthly approval limit reached',
-            'Please try again next month'
-          );
-          return;
-        }
-        
-        // 4. Approve contract
-        updatedContract.status = 'approved';
-        updatedContract.approvedAt = new Date();
-        await updatedContract.save();
-        
-        // 5. Create loan after approval
-        const loan = new Loan({
-          loanAmount: updatedContract.loanAmount,
-          loanTermMonths: updatedContract.loanTermMonths,
-          startDate: updatedContract.startDate,
-          typeTermID: updatedContract.typeTermID,
-          status: 'active'
-        });
-        
-        // Calculate end date
-        const endDate = new Date(updatedContract.startDate);
-        endDate.setMonth(endDate.getMonth() + updatedContract.loanTermMonths);
-        loan.endDate = endDate;
-        
-        await loan.save();
-        
-        // Link loan to contract
-        updatedContract.loanID = loan._id;
-        await updatedContract.save();
-
-        // 6. Notify all parties
-        await Promise.all([
-          notificationService.sendContractUpdate(
-            updatedContract.userID, 
-            updatedContract._id, 
-            'approved'
-          ),
-          notificationService.sendNotification(
-            updatedContract.sponsorID_1,
-            'contract_approved',
-            `Contract you sponsored has been approved`
-          ),
-          notificationService.sendNotification(
-            updatedContract.sponsorID_2,
-            'contract_approved',
-            `Contract you sponsored has been approved`
-          )
-        ]);
-        
-      } catch (error) {
-        console.error('Contract approval error:', error);
-      }
-    }, totalDelay);
   } catch (error) {
     console.error('Error in approval process:', error);
+    await rejectContract(contract, 'Processing error');
   }
+};
+
+// Calculate priority score for a contract
+const calculatePriorityScore = async (contract, loanTypeName) => {
+  let score = 0;
+  
+  // 1. Loan type priority (medical > educational > project)
+  const typeWeights = { medical: 100, educational: 50, project: 0 };
+  score += typeWeights[loanTypeName] || 0;
+  
+  // 2. Borrower history priority (new borrowers get higher priority)
+  const previousLoans = await Contract.countDocuments({
+    userID: contract.userID,
+    status: 'approved'
+  });
+  score += previousLoans === 0 ? 75 : 0;
+  
+  // 3. Application date priority (earlier applications get higher priority)
+  const timeDiff = new Date() - contract.createdAt;
+  const hoursSinceApplication = timeDiff / (1000 * 60 * 60);
+  score += Math.max(0, 50 - (hoursSinceApplication * 2));
+  
+  return score;
+};
+
+// Process all pending contracts in priority order
+const processPendingContracts = async () => {
+  try {
+    // Get all pending contracts sorted by priority (highest first)
+    const pendingContracts = await Contract.find({
+      status: 'pending_processing'
+    })
+    .populate({
+      path: 'typeTermID',
+      populate: { path: 'loanTypeID' }
+    })
+    .sort({ priority: -1, createdAt: 1 }); // Priority first, then FIFO
+    
+    for (const contract of pendingContracts) {
+      try {
+        await processSingleContract(contract);
+      } catch (error) {
+        console.error(`Error processing contract ${contract._id}:`, error);
+        await rejectContract(contract, 'Processing failed');
+      }
+    }
+  } catch (error) {
+    console.error('Error in processPendingContracts:', error);
+  }
+};
+
+// Process a single contract
+const processSingleContract = async (contract) => {
+  // 1. Check all required documents are approved
+  const requiredDocTypes = await additionalDocumentTypeModel.find({
+    typeTermID: contract.typeTermID,
+    isRequired: true
+  });
+  
+  const documents = await additionalDocumentModel.find({ 
+    contractID: contract._id 
+  });
+  
+  const allApproved = requiredDocTypes.every(docType => 
+    documents.some(doc => 
+      doc.typeID.equals(docType._id) && doc.status === 'approved'
+    )
+  );
+  
+  if (!allApproved) {
+    await rejectContract(
+      contract, 
+      'Missing required documents',
+      'Please ensure all required documents are uploaded and approved'
+    );
+    return;
+  }
+  
+  // 2. Check sponsor availability
+  const typeTerm = await typetermModel.findById(contract.typeTermID)
+    .populate('loanTypeID');
+  
+  const [sponsor1Count, sponsor2Count] = await Promise.all([
+    Contract.countDocuments({
+      $or: [
+        { sponsorID_1: contract.sponsorID_1 }, 
+        { sponsorID_2: contract.sponsorID_1 }
+      ],
+      status: 'approved',
+      'typeTermID.loanTypeID': typeTerm.loanTypeID._id
+    }),
+    Contract.countDocuments({
+      $or: [
+        { sponsorID_1: contract.sponsorID_2 }, 
+        { sponsorID_2: contract.sponsorID_2 }
+      ],
+      status: 'approved',
+      'typeTermID.loanTypeID': typeTerm.loanTypeID._id
+    })
+  ]);
+  
+  if (sponsor1Count >= 2 || sponsor2Count >= 2) {
+    await rejectContract(
+      contract, 
+      'Sponsor unavailable',
+      'One or both sponsors have reached their guarantee limit'
+    );
+    return;
+  }
+
+  // 3. Check monthly approval limit (5 contracts per month)
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  
+  const monthlyApprovedCount = await Contract.countDocuments({
+    status: 'approved',
+    approvedAt: { 
+      $gte: startOfMonth,
+      $lte: endOfMonth
+    }
+  });
+  
+  if (monthlyApprovedCount >= 5) {
+    await rejectContract(
+      contract, 
+      'Monthly approval limit reached',
+      'Please try again next month'
+    );
+    return;
+  }
+  
+  // 4. Approve contract
+  contract.status = 'approved';
+  contract.approvedAt = new Date();
+  await contract.save();
+  
+  // 5. Create loan after approval
+  const loan = new Loan({
+    loanAmount: contract.tempLoanAmount,
+    loanTermMonths: contract.tempLoanTermMonths,
+    startDate: contract.tempStartDate,
+    typeTermID: contract.typeTermID,
+    status: 'active'
+  });
+  
+  // Calculate end date
+  const endDate = new Date(contract.tempStartDate);
+  endDate.setMonth(endDate.getMonth() + contract.tempLoanTermMonths);
+  loan.endDate = endDate;
+  
+  await loan.save();
+  
+  // Link loan to contract
+  contract.loanID = loan._id;
+  await contract.save();
+
+  // 6. Notify all parties
+  await Promise.all([
+    notificationService.sendContractApprovalNotification(contract.userID, contract._id),
+    notificationService.sendContractApprovalNotification(contract.sponsorID_1, contract._id),
+    notificationService.sendContractApprovalNotification(contract.sponsorID_2, contract._id)
+  ]);
 };
 
 // Helper function to reject contract
@@ -617,30 +645,41 @@ async function rejectContract(contract, reason, details = '') {
   contract.rejectionReason = reason;
   await contract.save();
   
-  await notificationService.sendContractUpdate(
+  await notificationService.sendContractRejectionNotification(
     contract.userID, 
     contract._id, 
-    'rejected', 
-    `${reason}: ${details}`
+    `${reason}: ${details}`,
+    false
   );
 }
+
+// Scheduled job to process pending contracts (call this every 5 minutes)
+exports.processPendingContractsJob = async () => {
+  try {
+    console.log('Running scheduled contract processing job...');
+    await processPendingContracts();
+  } catch (error) {
+    console.error('Error in scheduled contract processing job:', error);
+  }
+};
+
+// Manual trigger for processing pending contracts (for admin use)
+exports.triggerContractProcessing = async (req, res) => {
+  try {
+    await processPendingContracts();
+    res.json({ message: 'Contract processing triggered successfully' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
 
 
 // Get all user contracts
 exports.getUserContracts = async (req, res) => {
-
   try {
-      const { User } = require('../models/user');
-      const { Contract } = require('../models/contract')
-      const {Loan}=require('../models/loan')
-      const {loanTermModel}=require('../models/loanTerm')
-      const {loanTypeModel}=require('../models/loanType')
-      const {typetermModel}=require('../models/typeterm')
-      const {additionalDocumentTypeModel}=require('../models/additionalDocumentType')
-      const {additionalDocumentModel}=require('../models/additionalDocument')
     const contracts = await Contract.find({ userID: req.user.id })
-      .populate('sponsorID_1', 'firstName lastName') // Sponsor 1 info
-      .populate('sponsorID_2', 'firstName lastName') // Sponsor 2 info
+      .populate('sponsorID_1', 'userFirstName userLastName') // Sponsor 1 info
+      .populate('sponsorID_2', 'userFirstName userLastName') // Sponsor 2 info
       .populate({
         path: 'typeTermID',
         populate: [
@@ -650,7 +689,18 @@ exports.getUserContracts = async (req, res) => {
       })
       .sort({ createdAt: -1 }); // Newest first
 
-    res.json(contracts);
+    // Add loan details to response for frontend display
+    const contractsWithLoanDetails = contracts.map(contract => {
+      const contractObj = contract.toObject();
+      return {
+        ...contractObj,
+        loanAmount: contract.tempLoanAmount,
+        loanTermMonths: contract.tempLoanTermMonths,
+        startDate: contract.tempStartDate
+      };
+    });
+
+    res.json(contractsWithLoanDetails);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -668,14 +718,229 @@ exports.getSponsorContracts = async (req, res) => {
         { sponsorID_2: sponsorId }
       ]
     })
-    .populate('userID', 'firstName lastName') // Borrower info
+    .populate('userID', 'userFirstName userLastName') // Borrower info
     .populate('typeTermID')
-    .populate('sponsorID_1', 'firstName lastName') // Sponsor 1 info
-    .populate('sponsorID_2', 'firstName lastName') // Sponsor 2 info
+    .populate('sponsorID_1', 'userFirstName userLastName') // Sponsor 1 info
+    .populate('sponsorID_2', 'userFirstName userLastName') // Sponsor 2 info
     .sort({ createdAt: -1 }); // Newest first
 
-    res.json(contracts);
+    // Add loan details to response for frontend display
+    const contractsWithLoanDetails = contracts.map(contract => {
+      const contractObj = contract.toObject();
+      return {
+        ...contractObj,
+        loanAmount: contract.tempLoanAmount,
+        loanTermMonths: contract.tempLoanTermMonths,
+        startDate: contract.tempStartDate
+      };
+    });
+
+    res.json(contractsWithLoanDetails);
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+};
+
+// Get user notifications
+exports.getUserNotifications = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { limit = 50, unreadOnly = false } = req.query;
+    
+    console.log('Getting notifications for user:', userId);
+    
+    const user = await User.findById(userId).select('notifications');
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    let notifications = user.notifications || [];
+    notifications = notifications.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    
+    if (unreadOnly === 'true') {
+      notifications = notifications.filter(n => !n.isRead);
+    }
+    
+    notifications = notifications.slice(0, parseInt(limit));
+    
+    console.log(`Found ${notifications.length} notifications for user ${userId}`);
+    
+    res.json({
+      notifications,
+      totalCount: user.notifications ? user.notifications.length : 0,
+      unreadCount: user.notifications ? user.notifications.filter(n => !n.isRead).length : 0
+    });
+  } catch (error) {
+    console.error('Error in getUserNotifications:', error);
+    res.status(500).json({ 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+};
+
+// Mark notification as read
+exports.markNotificationAsRead = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { notificationId } = req.params;
+    
+    const result = await User.updateOne(
+      { _id: userId, 'notifications._id': notificationId },
+      { $set: { 'notifications.$.isRead': true } }
+    );
+    
+    if (result.modifiedCount === 0) {
+      return res.status(404).json({ error: 'Notification not found' });
+    }
+    
+    res.json({ message: 'Notification marked as read' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Mark all notifications as read
+exports.markAllNotificationsAsRead = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    
+    await User.updateOne(
+      { _id: userId },
+      { $set: { 'notifications.$[].isRead': true } }
+    );
+    
+    res.json({ message: 'All notifications marked as read' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Get pending approvals for sponsors
+exports.getPendingApprovals = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    
+    console.log('Getting pending approvals for user:', userId);
+    
+    const user = await User.findById(userId)
+      .populate({
+        path: 'pendingApprovals.contractId',
+        populate: [
+          { path: 'userID', select: 'userFirstName userLastName email' },
+          { path: 'typeTermID', populate: { path: 'loanTypeID', select: 'loanName' } }
+        ]
+      })
+      .populate('pendingApprovals.borrowerId', 'userFirstName userLastName email');
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const pendingApprovals = (user.pendingApprovals || []).map(approval => {
+      const contract = approval.contractId;
+      if (!contract) {
+        console.warn('Contract not found for approval:', approval._id);
+        return null;
+      }
+      
+      return {
+        id: approval._id,
+        contract: {
+          ...contract.toObject(),
+          loanAmount: contract.tempLoanAmount,
+          loanTermMonths: contract.tempLoanTermMonths,
+          startDate: contract.tempStartDate
+        },
+        borrower: approval.borrowerId,
+        requestedAt: approval.requestedAt
+      };
+    }).filter(Boolean); // Remove null entries
+    
+    console.log(`Found ${pendingApprovals.length} pending approvals for user ${userId}`);
+    
+    res.json({
+      pendingApprovals,
+      count: pendingApprovals.length
+    });
+  } catch (error) {
+    console.error('Error in getPendingApprovals:', error);
+    res.status(500).json({ 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+};
+
+// Get notification count for header/badge
+exports.getNotificationCount = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    
+    console.log('Getting notification count for user:', userId);
+    
+    const user = await User.findById(userId).select('notifications pendingApprovals');
+    
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    const unreadNotifications = (user.notifications || []).filter(n => !n.isRead).length;
+    const pendingApprovals = (user.pendingApprovals || []).length;
+    
+    console.log(`User ${userId} has ${unreadNotifications} unread notifications and ${pendingApprovals} pending approvals`);
+    
+    res.json({
+      unreadNotifications,
+      pendingApprovals,
+      total: unreadNotifications + pendingApprovals
+    });
+  } catch (error) {
+    console.error('Error in getNotificationCount:', error);
+    res.status(500).json({ 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+};
+
+// Diagnostic endpoint to test connections
+exports.testConnections = async (req, res) => {
+  try {
+    console.log('Testing connections...');
+    
+    // Test database connection
+    const dbTest = await User.findOne().select('_id').limit(1);
+    console.log('Database connection: OK');
+    
+    // Test email connection if available
+    let emailTest = 'Not configured';
+    if (transporter) {
+      try {
+        await transporter.verify();
+        emailTest = 'OK';
+        console.log('Email connection: OK');
+      } catch (emailError) {
+        emailTest = `Error: ${emailError.message}`;
+        console.log('Email connection: FAILED');
+      }
+    }
+    
+    res.json({
+      status: 'success',
+      database: 'OK',
+      email: emailTest,
+      timestamp: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Error in testConnections:', error);
+    res.status(500).json({ 
+      status: 'error',
+      error: error.message,
+      database: 'FAILED',
+      email: 'Unknown',
+      timestamp: new Date().toISOString()
+    });
   }
 };

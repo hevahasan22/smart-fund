@@ -57,7 +57,7 @@ const loanSchema=new mongoose.Schema({
     {
         type:mongoose.Schema.Types.ObjectId,
         ref:'investor',
-        required:true
+        required:false // Made optional since it might not be available at contract approval
     },
     status: {
       type: String,
