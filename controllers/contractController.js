@@ -177,6 +177,8 @@ exports.createContract = async (req, res) => {
       isRequired: true
     });
 
+    console.log(`Found ${requiredDocTypes.length} required document types for this loan type`);
+
     // 9. Create contract
     const contract = new Contract({
       userID: userId,
@@ -193,42 +195,95 @@ exports.createContract = async (req, res) => {
 
     await contract.save();
 
-    // 10. Handle document uploads
+    // 10. Handle document uploads (required)
     const uploadedDocuments = [];
     
-    for (const docType of requiredDocTypes) {
-      const file = files.find(f => f.fieldname === `doc_${docType._id}`);
-      if (!file) {
+    if (requiredDocTypes.length > 0) {
+      console.log(`Processing ${files ? files.length : 0} uploaded files`);
+      
+      // Check if files were provided
+      if (!files || files.length === 0) {
         return res.status(400).json({ 
-          error: `Missing required document: ${docType.documentName}`,
-          requiredDocuments: requiredDocTypes.map(dt => dt.documentName)
+          error: 'Documents are required for this loan type',
+          message: 'Please upload all required documents to complete your application',
+          requiredDocuments: requiredDocTypes.map(dt => ({
+            id: dt._id,
+            name: dt.documentName,
+            description: dt.description || 'Required document'
+          })),
+          instructions: {
+            howToUpload: 'Send files using multipart/form-data with field names like "doc_[documentTypeId]"',
+            example: `For document type ${requiredDocTypes[0].documentName}, use field name "doc_${requiredDocTypes[0]._id}"`
+          }
         });
       }
+      
+      for (const docType of requiredDocTypes) {
+        const file = files.find(f => f.fieldname === `doc_${docType._id}`);
+        if (!file) {
+          return res.status(400).json({ 
+            error: `Missing required document: ${docType.documentName}`,
+            message: 'All required documents must be uploaded to complete your application',
+            missingDocument: {
+              id: docType._id,
+              name: docType.documentName,
+              description: docType.description || 'Required document'
+            },
+            requiredDocuments: requiredDocTypes.map(dt => ({
+              id: dt._id,
+              name: dt.documentName,
+              description: dt.description || 'Required document',
+              provided: files.some(f => f.fieldname === `doc_${dt._id}`)
+            })),
+            instructions: {
+              fieldName: `doc_${docType._id}`,
+              howToUpload: 'Send files using multipart/form-data with the correct field names'
+            }
+          });
+        }
 
-      // Upload to Cloudinary
-      const result = await new Promise((resolve, reject) => {
-        cloudinary.uploader.upload_stream(
-          { resource_type: 'auto', folder: 'documents' },
-          (error, result) => {
-            if (error) reject(error);
-            else resolve(result);
-          }
-        ).end(file.buffer);
-      });
+        try {
+          // Upload to Cloudinary
+          const result = await new Promise((resolve, reject) => {
+            cloudinary.uploader.upload_stream(
+              { resource_type: 'auto', folder: 'documents' },
+              (error, result) => {
+                if (error) reject(error);
+                else resolve(result);
+              }
+            ).end(file.buffer);
+          });
 
-      // Create document record
-      const document = new additionalDocumentModel({
-        typeID: docType._id,
-        contractID: contract._id,
-        documentFile: {
-          url: result.secure_url,
-          public_id: result.public_id
-        },
-        status: 'pending'
-      });
+          // Create document record with pending status for admin review
+          const document = new additionalDocumentModel({
+            typeID: docType._id,
+            contractID: contract._id,
+            documentFile: {
+              url: result.secure_url,
+              public_id: result.public_id
+            },
+            uploadedBy: userId,
+            status: 'pending'
+          });
 
-      await document.save();
-      uploadedDocuments.push(document);
+          await document.save();
+          uploadedDocuments.push(document);
+          console.log(`Document ${docType.documentName} uploaded successfully and pending admin review`);
+          
+          // Notify admin about new document pending review
+          await notificationService.sendDocumentPendingReview(document._id);
+        } catch (uploadError) {
+          console.error(`Error uploading document ${docType.documentName}:`, uploadError);
+          return res.status(500).json({ 
+            error: `Failed to upload document: ${docType.documentName}`,
+            message: 'There was an error uploading your document. Please try again.',
+            documentName: docType.documentName,
+            uploadError: uploadError.message
+          });
+        }
+      }
+    } else {
+      console.log('No documents required for this loan type');
     }
 
     // 11. Notify sponsors using notification service
@@ -266,14 +321,28 @@ exports.createContract = async (req, res) => {
       notificationService.sendSponsorRequest(sponsor2, borrower, loanDetails)
     ]);
     
-    // 10. Start approval process
-    processContractApproval(contract);
-    
-    res.status(201).json({
-      message: 'Contract created successfully. Waiting for sponsor approvals.',
-      contract,
-      documents: uploadedDocuments.map(doc => doc._id)
-    });
+    // 10. Set contract status based on document requirements
+    if (requiredDocTypes.length > 0) {
+      // If documents are required, contract waits for admin approval of documents
+      contract.status = 'pending_document_approval';
+      await contract.save();
+      
+      res.status(201).json({
+        message: 'Contract created successfully. Documents uploaded and pending admin review.',
+        contract,
+        documents: uploadedDocuments.map(doc => doc._id),
+        nextStep: 'Admin will review your documents before sponsor approval process begins'
+      });
+    } else {
+      // If no documents required, start sponsor approval process immediately
+      processContractApproval(contract);
+      
+      res.status(201).json({
+        message: 'Contract created successfully. Waiting for sponsor approvals.',
+        contract,
+        documents: uploadedDocuments.map(doc => doc._id)
+      });
+    }
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -358,6 +427,7 @@ exports.approveContractAsSponsor = async (req, res) => {
     
     // Check if both approved
     if (contract.sponsor1Approved && contract.sponsor2Approved) {
+      console.log(`Both sponsors approved contract ${contract._id}, starting processing...`);
       contract.status = 'pending_processing'; // Move to processing stage
       await contract.save();
       
@@ -365,8 +435,10 @@ exports.approveContractAsSponsor = async (req, res) => {
       await notificationService.sendContractProcessingNotification(contract.userID, contract._id);
       
       // Start approval process
+      console.log(`Calling processContractApproval for contract ${contract._id}`);
       processContractApproval(contract);
     } else {
+      console.log(`Partial approval for contract ${contract._id} - Sponsor1: ${contract.sponsor1Approved}, Sponsor2: ${contract.sponsor2Approved}`);
       await contract.save();
 
       // Notify other sponsor about the approval
@@ -445,6 +517,8 @@ exports.rejectContractAsSponsor = async (req, res) => {
 // Approval processing logic - improved version
 const processContractApproval = async (contract) => {
   try {
+    console.log(`Starting approval process for contract ${contract._id}`);
+    
     // Get loan type details
     const typeTerm = await typetermModel.findById(contract.typeTermID)
       .populate('loanTypeID')
@@ -457,9 +531,11 @@ const processContractApproval = async (contract) => {
     }
     
     const loanTypeName = typeTerm.loanTypeID.loanName.toLowerCase();
+    console.log(`Loan type: ${loanTypeName}`);
     
     // Calculate priority score
     const priorityScore = await calculatePriorityScore(contract, loanTypeName);
+    console.log(`Calculated priority score: ${priorityScore}`);
     
     // Update contract with priority score for processing
     await Contract.findByIdAndUpdate(contract._id, {
@@ -467,7 +543,10 @@ const processContractApproval = async (contract) => {
       status: 'pending_processing'
     });
     
+    console.log(`Contract ${contract._id} updated with priority ${priorityScore}`);
+    
     // Process immediately if no other pending contracts
+    console.log('Calling processPendingContracts...');
     await processPendingContracts();
     
   } catch (error) {
@@ -502,6 +581,8 @@ const calculatePriorityScore = async (contract, loanTypeName) => {
 // Process all pending contracts in priority order
 const processPendingContracts = async () => {
   try {
+    console.log('Starting to process pending contracts...');
+    
     // Get all pending contracts sorted by priority (highest first)
     const pendingContracts = await Contract.find({
       status: 'pending_processing'
@@ -512,14 +593,19 @@ const processPendingContracts = async () => {
     })
     .sort({ priority: -1, createdAt: 1 }); // Priority first, then FIFO
     
+    console.log(`Found ${pendingContracts.length} contracts pending processing`);
+    
     for (const contract of pendingContracts) {
       try {
+        console.log(`Processing contract ${contract._id} with priority ${contract.priority}`);
         await processSingleContract(contract);
       } catch (error) {
         console.error(`Error processing contract ${contract._id}:`, error);
         await rejectContract(contract, 'Processing failed');
       }
     }
+    
+    console.log('Finished processing pending contracts');
   } catch (error) {
     console.error('Error in processPendingContracts:', error);
   }
@@ -527,29 +613,53 @@ const processPendingContracts = async () => {
 
 // Process a single contract
 const processSingleContract = async (contract) => {
-  // 1. Check all required documents are approved
+  console.log(`Processing contract ${contract._id}...`);
+  
+  // 1. Check all required documents are approved by admin
   const requiredDocTypes = await additionalDocumentTypeModel.find({
     typeTermID: contract.typeTermID,
     isRequired: true
   });
   
-  const documents = await additionalDocumentModel.find({ 
-    contractID: contract._id 
-  });
+  console.log(`Found ${requiredDocTypes.length} required document types`);
   
-  const allApproved = requiredDocTypes.every(docType => 
-    documents.some(doc => 
-      doc.typeID.equals(docType._id) && doc.status === 'approved'
-    )
-  );
-  
-  if (!allApproved) {
-    await rejectContract(
-      contract, 
-      'Missing required documents',
-      'Please ensure all required documents are uploaded and approved'
+  if (requiredDocTypes.length > 0) {
+    const documents = await additionalDocumentModel.find({ 
+      contractID: contract._id 
+    });
+    
+    console.log(`Found ${documents.length} uploaded documents`);
+    
+    // Check if all required documents are approved (only approved status is accepted)
+    const allApproved = requiredDocTypes.every(docType => 
+      documents.some(doc => 
+        doc.typeID.equals(docType._id) && doc.status === 'approved'
+      )
     );
-    return;
+    
+    if (!allApproved) {
+      console.log('Contract processing paused: Waiting for admin document approval');
+      
+      // Find which documents are missing or not approved
+      const pendingDocs = requiredDocTypes.filter(docType => {
+        const doc = documents.find(d => doc.typeID.equals(docType._id));
+        return !doc || doc.status !== 'approved';
+      });
+      
+      // Update contract status to wait for document approval
+      if (contract.status !== 'pending_document_approval') {
+        contract.status = 'pending_document_approval';
+        await contract.save();
+        console.log(`Contract ${contract._id} status updated to pending_document_approval`);
+      }
+      
+      console.log(`Waiting for admin approval of documents: ${pendingDocs.map(d => d.documentName).join(', ')}`);
+      return;
+    }
+    
+    console.log('All required documents approved by admin');
+  } else {
+    console.log('No documents required for this contract type');
   }
   
   // 2. Check sponsor availability
@@ -575,7 +685,10 @@ const processSingleContract = async (contract) => {
     })
   ]);
   
+  console.log(`Sponsor counts - Sponsor1: ${sponsor1Count}, Sponsor2: ${sponsor2Count}`);
+  
   if (sponsor1Count >= 2 || sponsor2Count >= 2) {
+    console.log('Contract rejected: Sponsor unavailable');
     await rejectContract(
       contract, 
       'Sponsor unavailable',
@@ -597,7 +710,10 @@ const processSingleContract = async (contract) => {
     }
   });
   
+  console.log(`Monthly approved count: ${monthlyApprovedCount}`);
+  
   if (monthlyApprovedCount >= 5) {
+    console.log('Contract rejected: Monthly approval limit reached');
     await rejectContract(
       contract, 
       'Monthly approval limit reached',
@@ -607,6 +723,7 @@ const processSingleContract = async (contract) => {
   }
   
   // 4. Approve contract
+  console.log('Approving contract...');
   contract.status = 'approved';
   contract.approvedAt = new Date();
   await contract.save();
@@ -626,17 +743,21 @@ const processSingleContract = async (contract) => {
   loan.endDate = endDate;
   
   await loan.save();
+  console.log(`Loan created: ${loan._id}`);
   
   // Link loan to contract
   contract.loanID = loan._id;
   await contract.save();
 
   // 6. Notify all parties
+  console.log('Sending approval notifications...');
   await Promise.all([
     notificationService.sendContractApprovalNotification(contract.userID, contract._id),
     notificationService.sendContractApprovalNotification(contract.sponsorID_1, contract._id),
     notificationService.sendContractApprovalNotification(contract.sponsorID_2, contract._id)
   ]);
+  
+  console.log(`Contract ${contract._id} successfully approved and loan created`);
 };
 
 // Helper function to reject contract
@@ -666,9 +787,26 @@ exports.processPendingContractsJob = async () => {
 // Manual trigger for processing pending contracts (for admin use)
 exports.triggerContractProcessing = async (req, res) => {
   try {
+    console.log('Manual trigger for contract processing initiated');
+    
+    // Get count of pending contracts before processing
+    const pendingCount = await Contract.countDocuments({ status: 'pending_processing' });
+    console.log(`Found ${pendingCount} contracts pending processing`);
+    
     await processPendingContracts();
-    res.json({ message: 'Contract processing triggered successfully' });
+    
+    // Get count after processing
+    const remainingCount = await Contract.countDocuments({ status: 'pending_processing' });
+    const processedCount = pendingCount - remainingCount;
+    
+    res.json({ 
+      message: 'Contract processing triggered successfully',
+      processed: processedCount,
+      remaining: remainingCount,
+      total: pendingCount
+    });
   } catch (error) {
+    console.error('Error in manual trigger:', error);
     res.status(500).json({ error: error.message });
   }
 };
@@ -942,5 +1080,40 @@ exports.testConnections = async (req, res) => {
       email: 'Unknown',
       timestamp: new Date().toISOString()
     });
+  }
+};
+
+// Get required documents for a loan type
+exports.getRequiredDocuments = async (req, res) => {
+  try {
+    const { loanTypeId } = req.params;
+    
+    // Find the typeterm that matches this loan type
+    const typeTerm = await typetermModel.findOne({ loanTypeID: loanTypeId });
+    
+    if (!typeTerm) {
+      return res.status(404).json({ error: 'Loan type not found' });
+    }
+    
+    // Get required documents for this typeterm
+    const requiredDocuments = await additionalDocumentTypeModel.find({
+      typeTermID: typeTerm._id,
+      isRequired: true
+    });
+    
+    res.json({
+      loanTypeId,
+      typeTermId: typeTerm._id,
+      requiredDocuments: requiredDocuments.map(doc => ({
+        id: doc._id,
+        name: doc.documentName,
+        description: doc.description || 'No description available',
+        isRequired: doc.isRequired
+      })),
+      totalRequired: requiredDocuments.length
+    });
+  } catch (error) {
+    console.error('Error getting required documents:', error);
+    res.status(500).json({ error: error.message });
   }
 };

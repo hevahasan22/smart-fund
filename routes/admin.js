@@ -28,4 +28,17 @@ router.post('/type-terms', authenticate, requireAdmin, adminController.createTyp
 router.put('/type-terms/:typetermId', authenticate, requireAdmin, adminController.updateTypeTerm);
 router.delete('/type-terms/:typetermId', authenticate, requireAdmin, adminController.deleteTypeTerm);
 
+// Document Management
+router.put('/documents/:id/review', authenticate, requireAdmin, adminController.reviewDocument);
+router.get('/documents/pending', authenticate, requireAdmin, adminController.getPendingDocuments);
+router.get('/documents/stats', authenticate, requireAdmin, adminController.getDocumentStats);
+router.get('/documents', authenticate, requireAdmin, adminController.getAllDocuments);
+router.post('/documents/bulk-review', authenticate, requireAdmin, adminController.bulkReviewDocuments);
+
+// Document Type Management
+router.get('/document-types', authenticate, requireAdmin, adminController.getDocumentTypes);
+router.post('/document-types', authenticate, requireAdmin, adminController.createDocumentType);
+router.put('/document-types/:id', authenticate, requireAdmin, adminController.updateDocumentType);
+router.delete('/document-types/:id', authenticate, requireAdmin, adminController.deleteDocumentType);
+
 module.exports = router;

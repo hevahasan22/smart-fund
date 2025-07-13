@@ -83,6 +83,12 @@ const express = require('express');
        contractController.testConnections
      );
 
+     // Get required documents for a loan type
+     router.get(
+       '/required-documents/:loanTypeId',
+       contractController.getRequiredDocuments
+     );
+
     /*
  
     */

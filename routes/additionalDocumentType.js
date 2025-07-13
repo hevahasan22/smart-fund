@@ -3,7 +3,7 @@ const router = express.Router();
 const documentTypeController = require('../controllers/additionalDocumentTypeController');
 const { authenticate, requireAdmin } = require('../middleware/auth');
 
-router.post('/', authenticate, requireAdmin, documentTypeController.createDocumentType);
+router.post('/create-type', authenticate, requireAdmin, documentTypeController.createDocumentType);
 router.put('/:id', authenticate, requireAdmin, documentTypeController.updateDocumentType);
 router.delete('/:id', authenticate, requireAdmin, documentTypeController.deleteDocumentType);
 

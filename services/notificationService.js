@@ -249,6 +249,76 @@ exports.sendDocumentRejection = async (user, documentId, reason) => {
   await this.sendDualNotification(user._id, 'document_rejected', message, null, emailSubject, emailHtml);
 };
 
+// Send document pending review notification to admin
+exports.sendDocumentPendingReview = async (documentId) => {
+  try {
+    // Get all admin users
+    const admins = await User.find({ role: 'admin' });
+    
+    const message = `New document uploaded and pending review (ID: ${documentId})`;
+    const emailSubject = 'Document Pending Review';
+    const emailHtml = `
+      <p>Hello Admin,</p>
+      <p>A new document has been uploaded and is pending your review.</p>
+      <p><strong>Document ID:</strong> ${documentId}</p>
+      <p>Please log in to the admin panel to review this document.</p>
+      <p>Best regards,<br>Smart Fund Team</p>
+    `;
+    
+    // Send notification to all admins
+    for (const admin of admins) {
+      await this.sendDualNotification(admin._id, 'document_pending_review', message, null, emailSubject, emailHtml);
+    }
+    
+    console.log(`Document pending review notification sent to ${admins.length} admins`);
+  } catch (error) {
+    console.error('Error sending document pending review notification:', error);
+  }
+};
+
+// Send document approval notification to user
+exports.sendDocumentApprovalNotification = async (userId, documentId, documentName) => {
+  const message = `Your document "${documentName}" has been approved by admin`;
+  const emailSubject = 'Document Approved';
+  const emailHtml = `
+    <p>Hello,</p>
+    <p>Your document "${documentName}" has been approved by our admin team.</p>
+    <p>Your contract will now proceed to the next stage of processing.</p>
+    <p>Best regards,<br>Smart Fund Team</p>
+  `;
+  
+  await this.sendDualNotification(userId, 'document_approved', message, null, emailSubject, emailHtml);
+};
+
+// Send document rejection notification to user
+exports.sendDocumentRejectionNotification = async (userId, documentId, documentName, rejectionReason) => {
+  const message = `Your document "${documentName}" has been rejected. Reason: ${rejectionReason}`;
+  const emailSubject = 'Document Rejected';
+  const emailHtml = `
+    <p>Hello,</p>
+    <p>Your document "${documentName}" has been rejected by our admin team.</p>
+    <p><strong>Reason:</strong> ${rejectionReason}</p>
+    <p>Please review the requirements and re-upload the document.</p>
+    <p>Best regards,<br>Smart Fund Team</p>
+  `;
+  
+  await this.sendDualNotification(userId, 'document_rejected', message, null, emailSubject, emailHtml);
+};
+
+// Send contract document completion notification
+exports.sendContractDocumentCompletionNotification = async (userId, contractId) => {
+  const message = `All documents for your contract #${contractId} have been approved. Contract is now being processed.`;
+  const emailSubject = 'Documents Approved - Contract Processing';
+  const emailHtml = `
+    <p>Hello,</p>
+    <p>${message}</p>
+    <p>Your contract will now proceed to sponsor approval stage.</p>
+    <p>Best regards,<br>Smart Fund Team</p>
+  `;
+  
+  await this.sendDualNotification(userId, 'documents_completed', message, contractId, emailSubject, emailHtml);
+};
+
 // Send contract update notification (legacy function for backward compatibility)
 exports.sendContractUpdate = async (userId, contractId, status, details = '') => {
   try {

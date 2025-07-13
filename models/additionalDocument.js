@@ -1,6 +1,7 @@
 const cloudinary=require('cloudinary');
 const Joi = require('joi');
 const mongoos=require('mongoose');
+
 const additionalDocumentSchema=new mongoos.Schema({
     typeID:
     {
@@ -20,7 +21,16 @@ const additionalDocumentSchema=new mongoos.Schema({
         {
             type:String,
             required:true
+        },
+        public_id: {
+            type: String,
+            required: true
         }
+    },
+    uploadedBy: {
+        type: mongoos.Schema.Types.ObjectId,
+        ref: 'user',
+        required: true
     },
     uploadedAt:
     {
@@ -32,34 +42,55 @@ const additionalDocumentSchema=new mongoos.Schema({
         enum: ['pending', 'approved', 'rejected'],
         default: 'pending'
     },
-    rejectionReason: String
+    rejectionReason: String,
+    reviewedBy: {
+        type: mongoos.Schema.Types.ObjectId,
+        ref: 'user'
+    },
+    reviewedAt: {
+        type: Date
+    },
+    adminNotes: {
+        type: String,
+        maxlength: 500
+    }
  },{timestamps:true}
 )
 
 // Document validation middleware
 additionalDocumentSchema.pre('save', async function(next) {
-  const docType = await mongoose.model('AdditionalDocumentType').findById(this.typeID);
-  const contract = await mongoose.model('Contract').findById(this.contractID)
-    .populate({
-      path: 'loanID',
-      populate: {
+  try {
+    const docType = await mongoos.model('additionalDocumentType').findById(this.typeID);
+    const contract = await mongoos.model('contract').findById(this.contractID)
+      .populate({
         path: 'typeTermID',
         populate: 'loanTypeID'
-      }
-    });
-  
-  // 1. Verify document matches loan type-term
-  if (!contract.loanID.typeTermID._id.equals(docType.typeTermID)) {
-    throw new Error('Document type does not match loan type-term combination');
+      });
+    
+    if (!docType || !contract) {
+      throw new Error('Invalid document type or contract');
+    }
+    
+    // 1. Verify document matches loan type-term
+    if (!contract.typeTermID._id.equals(docType.typeTermID)) {
+      throw new Error('Document type does not match loan type-term combination');
+    }
+    
+    // 2. Check if file URL is provided
+    if (!this.documentFile || !this.documentFile.url) {
+      throw new Error('Document file is required');
+    }
+    
+    next();
+  } catch (error) {
+    next(error);
   }
-  
-  // 2. Check if file URL is provided
-  if (!this.documentFile) {
-    throw new Error('Document file is required');
-  }
-  
-  next();
 });
+
+// Index for efficient queries
+additionalDocumentSchema.index({ contractID: 1, status: 1 });
+additionalDocumentSchema.index({ uploadedBy: 1, status: 1 });
+additionalDocumentSchema.index({ reviewedBy: 1 });
 
 const additionalDocumentModel=mongoos.model('additionalDocument',additionalDocumentSchema);
 

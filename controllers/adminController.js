@@ -2,6 +2,9 @@ const { User, Contract, Payment, Investor } = require('../models/index');
 const { loanTypeModel } = require('../models/loanType');
 const { loanTermModel } = require('../models/loanTerm');
 const { typetermModel,validateTypeTerm } = require('../models/typeterm');
+const { additionalDocumentModel } = require('../models/additionalDocument');
+const { additionalDocumentTypeModel } = require('../models/additionalDocumentType');
+const notificationService = require('../services/notificationService');
 
 // Get all active users
 exports.getAllUsers = async (req, res) => {
@@ -462,6 +465,538 @@ exports.deleteTypeTerm = async (req, res) => {
     
     res.json({ message: 'Type-term combination deleted' });
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// ==================== DOCUMENT MANAGEMENT FUNCTIONS ====================
+
+// Admin: Review and approve/reject document
+exports.reviewDocument = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, rejectionReason, adminNotes } = req.body;
+    const adminId = req.user.id;
+    
+    console.log(`Document review request - Document: ${id}, Status: ${status}, Admin: ${adminId}`);
+    
+    // Validate input
+    if (!['approved', 'rejected'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status. Must be "approved" or "rejected"' });
+    }
+    
+    if (status === 'rejected' && !rejectionReason) {
+      return res.status(400).json({ error: 'Rejection reason is required when rejecting a document' });
+    }
+    
+    // Find and update document
+    const document = await additionalDocumentModel.findById(id)
+      .populate('contractID')
+      .populate('uploadedBy')
+      .populate('typeID');
+    
+    if (!document) {
+      return res.status(404).json({ error: 'Document not found' });
+    }
+    
+    // Check if document is already reviewed
+    if (document.status !== 'pending') {
+      return res.status(400).json({ 
+        error: 'Document has already been reviewed',
+        currentStatus: document.status
+      });
+    }
+    
+    // Update document status
+    document.status = status;
+    document.reviewedBy = adminId;
+    document.reviewedAt = new Date();
+    
+    if (status === 'rejected') {
+      document.rejectionReason = rejectionReason;
+    }
+    
+    if (adminNotes) {
+      document.adminNotes = adminNotes;
+    }
+    
+    await document.save();
+    
+    console.log(`Document ${id} ${status} by admin ${adminId}`);
+    
+    // Send notification to document uploader
+    if (document.uploadedBy) {
+      if (status === 'approved') {
+        await notificationService.sendDocumentApprovalNotification(
+          document.uploadedBy._id, 
+          document._id, 
+          document.typeID.documentName
+        );
+      } else {
+        await notificationService.sendDocumentRejectionNotification(
+          document.uploadedBy._id, 
+          document._id, 
+          document.typeID.documentName,
+          rejectionReason
+        );
+      }
+    }
+    
+    // Check if all required documents for this contract are now approved
+    if (status === 'approved') {
+      await checkContractDocumentCompletion(document.contractID);
+    }
+    
+    res.json({
+      message: `Document ${status} successfully`,
+      document: {
+        id: document._id,
+        status: document.status,
+        reviewedBy: adminId,
+        reviewedAt: document.reviewedAt,
+        rejectionReason: document.rejectionReason,
+        adminNotes: document.adminNotes
+      }
+    });
+  } catch (error) {
+    console.error('Error reviewing document:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Check if all required documents for a contract are approved
+const checkContractDocumentCompletion = async (contractId) => {
+  try {
+    console.log(`Checking document completion for contract ${contractId}`);
+    
+    const contract = await Contract.findById(contractId);
+    if (!contract) {
+      console.error('Contract not found for document completion check');
+      return;
+    }
+    
+    // Get all required document types for this contract
+    const requiredDocTypes = await additionalDocumentTypeModel.find({
+      typeTermID: contract.typeTermID,
+      isRequired: true
+    });
+    
+    if (requiredDocTypes.length === 0) {
+      console.log('No required documents for this contract type');
+      return;
+    }
+    
+    // Get all documents for this contract
+    const documents = await additionalDocumentModel.find({ contractID: contractId });
+    
+    // Check if all required documents are approved
+    const allApproved = requiredDocTypes.every(docType => 
+      documents.some(doc => 
+        doc.typeID.equals(docType._id) && doc.status === 'approved'
+      )
+    );
+    
+    if (allApproved) {
+      console.log(`All documents approved for contract ${contractId}, triggering contract processing`);
+      
+      // Update contract status to pending processing if it was waiting for documents
+      if (contract.status === 'pending_document_approval') {
+        contract.status = 'pending_sponsor_approval';
+        await contract.save();
+        
+        // Notify user that all documents are approved and contract is proceeding
+        await notificationService.sendContractDocumentCompletionNotification(contract.userID, contract._id);
+        
+        // Trigger contract processing
+        const { processContractApproval } = require('./contractController');
+        await processContractApproval(contract);
+      }
+    } else {
+      console.log(`Not all documents approved for contract ${contractId}`);
+    }
+  } catch (error) {
+    console.error('Error checking document completion:', error);
+  }
+};
+
+// Admin: Get all pending documents for review
+exports.getPendingDocuments = async (req, res) => {
+  try {
+    const { page = 1, limit = 20, contractId } = req.query;
+    
+    console.log(`Getting pending documents - Page: ${page}, Limit: ${limit}, Contract: ${contractId}`);
+    
+    const query = { status: 'pending' };
+    if (contractId) {
+      query.contractID = contractId;
+    }
+    
+    const documents = await additionalDocumentModel.find(query)
+      .populate('typeID')
+      .populate('contractID')
+      .populate('uploadedBy', 'userFirstName userLastName email')
+      .sort({ uploadedAt: 1 })
+      .limit(parseInt(limit))
+      .skip((parseInt(page) - 1) * parseInt(limit));
+    
+    const total = await additionalDocumentModel.countDocuments(query);
+    
+    console.log(`Found ${documents.length} pending documents out of ${total} total`);
+    
+    res.json({
+      documents: documents.map(doc => ({
+        id: doc._id,
+        type: doc.typeID.documentName,
+        contractId: doc.contractID._id,
+        uploadedBy: doc.uploadedBy,
+        uploadedAt: doc.uploadedAt,
+        documentFile: doc.documentFile
+      })),
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (error) {
+    console.error('Error getting pending documents:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Get document statistics for admin dashboard
+exports.getDocumentStats = async (req, res) => {
+  try {
+    console.log('Getting document statistics for admin dashboard');
+    
+    const [pendingCount, approvedCount, rejectedCount, totalCount] = await Promise.all([
+      additionalDocumentModel.countDocuments({ status: 'pending' }),
+      additionalDocumentModel.countDocuments({ status: 'approved' }),
+      additionalDocumentModel.countDocuments({ status: 'rejected' }),
+      additionalDocumentModel.countDocuments({})
+    ]);
+    
+    // Get recent activity (last 7 days)
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    
+    const recentUploads = await additionalDocumentModel.countDocuments({
+      uploadedAt: { $gte: sevenDaysAgo }
+    });
+    
+    const recentReviews = await additionalDocumentModel.countDocuments({
+      reviewedAt: { $gte: sevenDaysAgo }
+    });
+    
+    res.json({
+      total: totalCount,
+      pending: pendingCount,
+      approved: approvedCount,
+      rejected: rejectedCount,
+      recentActivity: {
+        uploads: recentUploads,
+        reviews: recentReviews
+      },
+      percentages: {
+        pending: totalCount > 0 ? Math.round((pendingCount / totalCount) * 100) : 0,
+        approved: totalCount > 0 ? Math.round((approvedCount / totalCount) * 100) : 0,
+        rejected: totalCount > 0 ? Math.round((rejectedCount / totalCount) * 100) : 0
+      }
+    });
+  } catch (error) {
+    console.error('Error getting document statistics:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Admin: Get all documents with filtering and pagination
+exports.getAllDocuments = async (req, res) => {
+  try {
+    const { 
+      page = 1, 
+      limit = 20, 
+      status, 
+      contractId, 
+      uploadedBy,
+      sortBy = 'uploadedAt',
+      sortOrder = 'desc'
+    } = req.query;
+    
+    console.log(`Getting all documents with filters - Status: ${status}, Contract: ${contractId}`);
+    
+    // Build query
+    const query = {};
+    if (status) query.status = status;
+    if (contractId) query.contractID = contractId;
+    if (uploadedBy) query.uploadedBy = uploadedBy;
+    
+    // Build sort object
+    const sort = {};
+    sort[sortBy] = sortOrder === 'desc' ? -1 : 1;
+    
+    const documents = await additionalDocumentModel.find(query)
+      .populate('typeID')
+      .populate('contractID')
+      .populate('uploadedBy', 'userFirstName userLastName email')
+      .populate('reviewedBy', 'userFirstName userLastName')
+      .sort(sort)
+      .limit(parseInt(limit))
+      .skip((parseInt(page) - 1) * parseInt(limit));
+    
+    const total = await additionalDocumentModel.countDocuments(query);
+    
+    res.json({
+      documents: documents.map(doc => ({
+        id: doc._id,
+        type: doc.typeID.documentName,
+        contractId: doc.contractID._id,
+        status: doc.status,
+        uploadedBy: doc.uploadedBy,
+        uploadedAt: doc.uploadedAt,
+        reviewedBy: doc.reviewedBy,
+        reviewedAt: doc.reviewedAt,
+        rejectionReason: doc.rejectionReason,
+        adminNotes: doc.adminNotes,
+        documentFile: doc.documentFile
+      })),
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit))
+      },
+      filters: {
+        status,
+        contractId,
+        uploadedBy
+      }
+    });
+  } catch (error) {
+    console.error('Error getting all documents:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Admin: Bulk review documents
+exports.bulkReviewDocuments = async (req, res) => {
+  try {
+    const { documentIds, status, rejectionReason, adminNotes } = req.body;
+    const adminId = req.user.id;
+    
+    console.log(`Bulk review request - Documents: ${documentIds.length}, Status: ${status}`);
+    
+    if (!Array.isArray(documentIds) || documentIds.length === 0) {
+      return res.status(400).json({ error: 'Document IDs array is required' });
+    }
+    
+    if (!['approved', 'rejected'].includes(status)) {
+      return res.status(400).json({ error: 'Invalid status' });
+    }
+    
+    if (status === 'rejected' && !rejectionReason) {
+      return res.status(400).json({ error: 'Rejection reason is required for bulk rejection' });
+    }
+    
+    const results = [];
+    const errors = [];
+    
+    for (const docId of documentIds) {
+      try {
+        const document = await additionalDocumentModel.findById(docId)
+          .populate('contractID')
+          .populate('uploadedBy')
+          .populate('typeID');
+        
+        if (!document) {
+          errors.push({ docId, error: 'Document not found' });
+          continue;
+        }
+        
+        if (document.status !== 'pending') {
+          errors.push({ docId, error: 'Document already reviewed' });
+          continue;
+        }
+        
+        // Update document
+        document.status = status;
+        document.reviewedBy = adminId;
+        document.reviewedAt = new Date();
+        
+        if (status === 'rejected') {
+          document.rejectionReason = rejectionReason;
+        }
+        
+        if (adminNotes) {
+          document.adminNotes = adminNotes;
+        }
+        
+        await document.save();
+        
+        // Send notification
+        if (document.uploadedBy) {
+          if (status === 'approved') {
+            await notificationService.sendDocumentApprovalNotification(
+              document.uploadedBy._id, 
+              document._id, 
+              document.typeID.documentName
+            );
+          } else {
+            await notificationService.sendDocumentRejectionNotification(
+              document.uploadedBy._id, 
+              document._id, 
+              document.typeID.documentName,
+              rejectionReason
+            );
+          }
+        }
+        
+        results.push({ docId, status: 'success' });
+        
+        // Check contract completion if approved
+        if (status === 'approved') {
+          await checkContractDocumentCompletion(document.contractID);
+        }
+        
+      } catch (error) {
+        console.error(`Error processing document ${docId}:`, error);
+        errors.push({ docId, error: error.message });
+      }
+    }
+    
+    res.json({
+      message: `Bulk review completed`,
+      results: {
+        successful: results.length,
+        failed: errors.length,
+        total: documentIds.length
+      },
+      details: {
+        successful: results,
+        errors
+      }
+    });
+  } catch (error) {
+    console.error('Error in bulk review:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Admin: Get document types management
+exports.getDocumentTypes = async (req, res) => {
+  try {
+    const documentTypes = await additionalDocumentTypeModel.find()
+      .populate('typeTermID')
+      .sort({ documentName: 1 });
+    
+    res.json({
+      documentTypes: documentTypes.map(dt => ({
+        id: dt._id,
+        name: dt.documentName,
+        description: dt.description,
+        isRequired: dt.isRequired,
+        typeTerm: dt.typeTermID
+      }))
+    });
+  } catch (error) {
+    console.error('Error getting document types:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Admin: Create document type
+exports.createDocumentType = async (req, res) => {
+  try {
+    const { documentName, typeTermID, description, isRequired = true } = req.body;
+    
+    if (!documentName || !typeTermID) {
+      return res.status(400).json({ error: 'Document name and type term ID are required' });
+    }
+    
+    // Check if type term exists
+    const typeTerm = await typetermModel.findById(typeTermID);
+    if (!typeTerm) {
+      return res.status(400).json({ error: 'Invalid type term ID' });
+    }
+    
+    // Check for duplicate document type
+    const existing = await additionalDocumentTypeModel.findOne({
+      documentName,
+      typeTermID
+    });
+    
+    if (existing) {
+      return res.status(400).json({ error: 'Document type already exists for this loan type-term combination' });
+    }
+    
+    const documentType = new additionalDocumentTypeModel({
+      documentName,
+      typeTermID,
+      description,
+      isRequired
+    });
+    
+    await documentType.save();
+    
+    res.status(201).json({
+      message: 'Document type created successfully',
+      documentType
+    });
+  } catch (error) {
+    console.error('Error creating document type:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Admin: Update document type
+exports.updateDocumentType = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+    
+    const documentType = await additionalDocumentTypeModel.findByIdAndUpdate(
+      id,
+      updates,
+      { new: true, runValidators: true }
+    );
+    
+    if (!documentType) {
+      return res.status(404).json({ error: 'Document type not found' });
+    }
+    
+    res.json({
+      message: 'Document type updated successfully',
+      documentType
+    });
+  } catch (error) {
+    console.error('Error updating document type:', error);
+    res.status(500).json({ error: error.message });
+  }
+};
+
+// Admin: Delete document type
+exports.deleteDocumentType = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Check if document type is being used
+    const documentsUsingType = await additionalDocumentModel.countDocuments({ typeID: id });
+    if (documentsUsingType > 0) {
+      return res.status(400).json({ 
+        error: 'Cannot delete document type that is being used by existing documents',
+        documentsCount: documentsUsingType
+      });
+    }
+    
+    const documentType = await additionalDocumentTypeModel.findByIdAndDelete(id);
+    
+    if (!documentType) {
+      return res.status(404).json({ error: 'Document type not found' });
+    }
+    
+    res.json({ message: 'Document type deleted successfully' });
+  } catch (error) {
+    console.error('Error deleting document type:', error);
     res.status(500).json({ error: error.message });
   }
 };
