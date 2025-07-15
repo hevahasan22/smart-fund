@@ -252,12 +252,10 @@ exports.getAllInvestors = async (req, res) => {
 // Create loan type
 exports.createLoanType = async (req, res) => {
   try {
-    const { loanName, maxAmount, minAmount, description, priority } = req.body;
+    const { loanName, description, priority } = req.body;
     
     const loanType = new loanTypeModel({
       loanName,
-      maxAmount,
-      minAmount,
       description,
       priority
     });
@@ -364,7 +362,7 @@ exports.deleteLoanTerm = async (req, res) => {
 // Create type-term combination
 exports.createTypeTerm = async (req, res) => {
   try {
-    const { name, loanTypeID, loanTermID, interestRate } = req.body;
+    const { name, loanTypeID, loanTermID, interestRate, minAmount, maxAmount } = req.body;
 
     // Validate input with Joi
     const { error } = validateTypeTerm(req.body);
@@ -398,7 +396,9 @@ exports.createTypeTerm = async (req, res) => {
       name,
       loanTypeID,
       loanTermID,
-      interestRate
+      interestRate,
+      minAmount,
+      maxAmount
     });
     
     await typeTerm.save();
@@ -415,11 +415,9 @@ exports.updateTypeTerm = async (req, res) => {
     const updates = req.body;
 
     // Validate input with Joi
-    if (updates.loanTypeID || updates.loanTermID) {
-      const { error } = validateTypeTerm(updates);
-      if (error) {
-        return res.status(400).json({ error: error.details[0].message });
-      }
+    const { error } = validateTypeTerm(updates);
+    if (error) {
+      return res.status(400).json({ error: error.details[0].message });
     }
     
     // If changing type/term, check for existing combination

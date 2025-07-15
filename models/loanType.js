@@ -9,22 +9,6 @@ const loanTypeSchema=new mongoose.Schema({
         minlength:4,
         maxlength:20
     },
-  
-    maxAmount:{
-        type:Number,
-        required:true,
-        validate: {
-          validator: function(v) {
-            return v > this.minAmount;
-          },
-          message: 'Max amount must be greater than min amount'
-        }
-    },
-    minAmount:{
-        type:Number,
-        required:true,
-        min: [0, 'Minimum amount cannot be negative']
-    },
     description:{
         type:String,
     },

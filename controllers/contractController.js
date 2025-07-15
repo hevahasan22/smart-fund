@@ -100,12 +100,12 @@ exports.createContract = async (req, res) => {
     }
 
     // 4. Validate loan parameters
-    if (loanAmount < loanTypeRecord.minAmount || 
-        loanAmount > loanTypeRecord.maxAmount) {
+    if (loanAmount < typeTerm.minAmount || 
+        loanAmount > typeTerm.maxAmount) {
       return res.status(400).json({ 
-        error: `Loan amount must be between ${loanTypeRecord.minAmount} and ${loanTypeRecord.maxAmount}`,
-        minAmount: loanTypeRecord.minAmount,
-        maxAmount: loanTypeRecord.maxAmount
+        error: `Loan amount must be between ${typeTerm.minAmount} and ${typeTerm.maxAmount}`,
+        minAmount: typeTerm.minAmount,
+        maxAmount: typeTerm.maxAmount
       });
     }
 

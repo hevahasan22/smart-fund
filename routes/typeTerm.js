@@ -5,6 +5,6 @@ const { authenticate, requireAdmin } = require('../middleware/auth');
 
 // Public routes
 router.get('/', typeTermController.getAllTypeTerms);
-router.get('/:id', typeTermController.getTypeTermById); // New route
+router.get('/:id', typeTermController.getTypeTermById); 
 
 module.exports = router;
