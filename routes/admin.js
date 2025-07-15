@@ -33,8 +33,6 @@ router.put('/documents/:id/review', authenticate, requireAdmin, adminController.
 router.get('/documents/pending', authenticate, requireAdmin, adminController.getPendingDocuments);
 router.get('/documents/stats', authenticate, requireAdmin, adminController.getDocumentStats);
 router.get('/documents', authenticate, requireAdmin, adminController.getAllDocuments);
-router.post('/documents/bulk-review', authenticate, requireAdmin, adminController.bulkReviewDocuments);
-
 // Document Type Management
 router.get('/document-types', authenticate, requireAdmin, adminController.getDocumentTypes);
 router.post('/document-types', authenticate, requireAdmin, adminController.createDocumentType);

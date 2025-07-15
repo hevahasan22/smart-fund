@@ -4,6 +4,7 @@ const { loanTermModel } = require('../models/loanTerm');
 const { typetermModel,validateTypeTerm } = require('../models/typeterm');
 const { additionalDocumentModel } = require('../models/additionalDocument');
 const { additionalDocumentTypeModel } = require('../models/additionalDocumentType');
+const { documentTypeTermRelationModel } = require('../models/documentTypeTermRelation');
 const notificationService = require('../services/notificationService');
 
 // Get all active users
@@ -492,7 +493,7 @@ exports.reviewDocument = async (req, res) => {
     // Find and update document
     const document = await additionalDocumentModel.findById(id)
       .populate('contractID')
-      .populate('uploadedBy')
+      .populate({ path: 'uploadedBy', model: 'User' })
       .populate('typeID');
     
     if (!document) {
@@ -575,11 +576,18 @@ const checkContractDocumentCompletion = async (contractId) => {
       return;
     }
     
-    // Get all required document types for this contract
-    const requiredDocTypes = await additionalDocumentTypeModel.find({
+    // Get all required document types for this contract using junction table
+    const requiredDocTypeRelations = await documentTypeTermRelationModel.find({
       typeTermID: contract.typeTermID,
       isRequired: true
-    });
+    }).populate('documentTypeID');
+
+    const requiredDocTypes = requiredDocTypeRelations.map(relation => ({
+      _id: relation.documentTypeID._id,
+      documentName: relation.documentTypeID.documentName,
+      description: relation.documentTypeID.description,
+      isRequired: relation.isRequired
+    }));
     
     if (requiredDocTypes.length === 0) {
       console.log('No required documents for this contract type');
@@ -633,8 +641,8 @@ exports.getPendingDocuments = async (req, res) => {
     
     const documents = await additionalDocumentModel.find(query)
       .populate('typeID')
-      .populate('contractID')
-      .populate('uploadedBy', 'userFirstName userLastName email')
+      .populate({ path: 'contractID', model: 'Contract' })
+      .populate({ path: 'uploadedBy', model: 'User' })
       .sort({ uploadedAt: 1 })
       .limit(parseInt(limit))
       .skip((parseInt(page) - 1) * parseInt(limit));
@@ -737,9 +745,9 @@ exports.getAllDocuments = async (req, res) => {
     
     const documents = await additionalDocumentModel.find(query)
       .populate('typeID')
-      .populate('contractID')
-      .populate('uploadedBy', 'userFirstName userLastName email')
-      .populate('reviewedBy', 'userFirstName userLastName')
+      .populate({ path: 'contractID', model: 'Contract' })
+      .populate({ path: 'uploadedBy', model: 'User' })
+      .populate({ path: 'reviewedBy', model: 'User' })
       .sort(sort)
       .limit(parseInt(limit))
       .skip((parseInt(page) - 1) * parseInt(limit));
@@ -777,125 +785,31 @@ exports.getAllDocuments = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
-
-// Admin: Bulk review documents
-exports.bulkReviewDocuments = async (req, res) => {
-  try {
-    const { documentIds, status, rejectionReason, adminNotes } = req.body;
-    const adminId = req.user.id;
-    
-    console.log(`Bulk review request - Documents: ${documentIds.length}, Status: ${status}`);
-    
-    if (!Array.isArray(documentIds) || documentIds.length === 0) {
-      return res.status(400).json({ error: 'Document IDs array is required' });
-    }
-    
-    if (!['approved', 'rejected'].includes(status)) {
-      return res.status(400).json({ error: 'Invalid status' });
-    }
-    
-    if (status === 'rejected' && !rejectionReason) {
-      return res.status(400).json({ error: 'Rejection reason is required for bulk rejection' });
-    }
-    
-    const results = [];
-    const errors = [];
-    
-    for (const docId of documentIds) {
-      try {
-        const document = await additionalDocumentModel.findById(docId)
-          .populate('contractID')
-          .populate('uploadedBy')
-          .populate('typeID');
-        
-        if (!document) {
-          errors.push({ docId, error: 'Document not found' });
-          continue;
-        }
-        
-        if (document.status !== 'pending') {
-          errors.push({ docId, error: 'Document already reviewed' });
-          continue;
-        }
-        
-        // Update document
-        document.status = status;
-        document.reviewedBy = adminId;
-        document.reviewedAt = new Date();
-        
-        if (status === 'rejected') {
-          document.rejectionReason = rejectionReason;
-        }
-        
-        if (adminNotes) {
-          document.adminNotes = adminNotes;
-        }
-        
-        await document.save();
-        
-        // Send notification
-        if (document.uploadedBy) {
-          if (status === 'approved') {
-            await notificationService.sendDocumentApprovalNotification(
-              document.uploadedBy._id, 
-              document._id, 
-              document.typeID.documentName
-            );
-          } else {
-            await notificationService.sendDocumentRejectionNotification(
-              document.uploadedBy._id, 
-              document._id, 
-              document.typeID.documentName,
-              rejectionReason
-            );
-          }
-        }
-        
-        results.push({ docId, status: 'success' });
-        
-        // Check contract completion if approved
-        if (status === 'approved') {
-          await checkContractDocumentCompletion(document.contractID);
-        }
-        
-      } catch (error) {
-        console.error(`Error processing document ${docId}:`, error);
-        errors.push({ docId, error: error.message });
-      }
-    }
-    
-    res.json({
-      message: `Bulk review completed`,
-      results: {
-        successful: results.length,
-        failed: errors.length,
-        total: documentIds.length
-      },
-      details: {
-        successful: results,
-        errors
-      }
-    });
-  } catch (error) {
-    console.error('Error in bulk review:', error);
-    res.status(500).json({ error: error.message });
-  }
-};
-
 // Admin: Get document types management
 exports.getDocumentTypes = async (req, res) => {
   try {
     const documentTypes = await additionalDocumentTypeModel.find()
-      .populate('typeTermID')
       .sort({ documentName: 1 });
+    
+    // Get all relationships
+    const relations = await documentTypeTermRelationModel.find()
+      .populate('documentTypeID')
+      .populate('typeTermID');
     
     res.json({
       documentTypes: documentTypes.map(dt => ({
         id: dt._id,
         name: dt.documentName,
         description: dt.description,
-        isRequired: dt.isRequired,
-        typeTerm: dt.typeTermID
+        createdAt: dt.createdAt,
+        relations: relations
+          .filter(r => r.documentTypeID._id.equals(dt._id))
+          .map(r => ({
+            relationId: r._id,
+            typeTermId: r.typeTermID._id,
+            typeTermName: r.typeTermID.name,
+            isRequired: r.isRequired
+          }))
       }))
     });
   } catch (error) {
@@ -907,33 +821,22 @@ exports.getDocumentTypes = async (req, res) => {
 // Admin: Create document type
 exports.createDocumentType = async (req, res) => {
   try {
-    const { documentName, typeTermID, description, isRequired = true } = req.body;
+    const { documentName, description } = req.body;
     
-    if (!documentName || !typeTermID) {
-      return res.status(400).json({ error: 'Document name and type term ID are required' });
-    }
-    
-    // Check if type term exists
-    const typeTerm = await typetermModel.findById(typeTermID);
-    if (!typeTerm) {
-      return res.status(400).json({ error: 'Invalid type term ID' });
+    if (!documentName) {
+      return res.status(400).json({ error: 'Document name is required' });
     }
     
     // Check for duplicate document type
-    const existing = await additionalDocumentTypeModel.findOne({
-      documentName,
-      typeTermID
-    });
+    const existing = await additionalDocumentTypeModel.findOne({ documentName });
     
     if (existing) {
-      return res.status(400).json({ error: 'Document type already exists for this loan type-term combination' });
+      return res.status(400).json({ error: 'Document type with this name already exists' });
     }
     
     const documentType = new additionalDocumentTypeModel({
       documentName,
-      typeTermID,
-      description,
-      isRequired
+      description
     });
     
     await documentType.save();
@@ -979,7 +882,16 @@ exports.deleteDocumentType = async (req, res) => {
   try {
     const { id } = req.params;
     
-    // Check if document type is being used
+    // Check if document type is being used in relationships
+    const relationsCount = await documentTypeTermRelationModel.countDocuments({ documentTypeID: id });
+    if (relationsCount > 0) {
+      return res.status(400).json({ 
+        error: 'Cannot delete document type that is associated with type terms',
+        relationsCount
+      });
+    }
+    
+    // Check if document type is being used by existing documents
     const documentsUsingType = await additionalDocumentModel.countDocuments({ typeID: id });
     if (documentsUsingType > 0) {
       return res.status(400).json({ 

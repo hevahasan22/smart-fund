@@ -1,26 +1,22 @@
-const cloudinary=require('cloudinary');
+const cloudinary = require('cloudinary');
 const Joi = require('joi');
-const mongoos=require('mongoose');
+const mongoose = require('mongoose');
 
-const additionalDocumentSchema=new mongoos.Schema({
-    typeID:
-    {
-        type:mongoos.Schema.Types.ObjectId,
-        ref:'additionalDocumentType',
-        required:true
+const additionalDocumentSchema = new mongoose.Schema({
+    typeID: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'additionalDocumentType',
+        required: true
     },
-    contractID:
-    {
-        type:mongoos.Schema.Types.ObjectId,
-        ref:'contract',
-        required:true
+    contractID: {
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'Contract', // Capital C
+        required: true
     },
-    documentFile:
-    {
-        url:
-        {
-            type:String,
-            required:true
+    documentFile: {
+        url: {
+            type: String,
+            required: true
         },
         public_id: {
             type: String,
@@ -28,13 +24,12 @@ const additionalDocumentSchema=new mongoos.Schema({
         }
     },
     uploadedBy: {
-        type: mongoos.Schema.Types.ObjectId,
-        ref: 'user',
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User', // Capital U
         required: true
     },
-    uploadedAt:
-    {
-        type:Date,
+    uploadedAt: {
+        type: Date,
         default: Date.now
     },
     status: {
@@ -44,8 +39,8 @@ const additionalDocumentSchema=new mongoos.Schema({
     },
     rejectionReason: String,
     reviewedBy: {
-        type: mongoos.Schema.Types.ObjectId,
-        ref: 'user'
+        type: mongoose.Schema.Types.ObjectId,
+        ref: 'User' // Capital U
     },
     reviewedAt: {
         type: Date
@@ -54,37 +49,8 @@ const additionalDocumentSchema=new mongoos.Schema({
         type: String,
         maxlength: 500
     }
- },{timestamps:true}
-)
-
-// Document validation middleware
-additionalDocumentSchema.pre('save', async function(next) {
-  try {
-    const docType = await mongoos.model('additionalDocumentType').findById(this.typeID);
-    const contract = await mongoos.model('contract').findById(this.contractID)
-      .populate({
-        path: 'typeTermID',
-        populate: 'loanTypeID'
-      });
-    
-    if (!docType || !contract) {
-      throw new Error('Invalid document type or contract');
-    }
-    
-    // 1. Verify document matches loan type-term
-    if (!contract.typeTermID._id.equals(docType.typeTermID)) {
-      throw new Error('Document type does not match loan type-term combination');
-    }
-    
-    // 2. Check if file URL is provided
-    if (!this.documentFile || !this.documentFile.url) {
-      throw new Error('Document file is required');
-    }
-    
-    next();
-  } catch (error) {
-    next(error);
-  }
+}, {
+    timestamps: true
 });
 
 // Index for efficient queries
@@ -92,8 +58,8 @@ additionalDocumentSchema.index({ contractID: 1, status: 1 });
 additionalDocumentSchema.index({ uploadedBy: 1, status: 1 });
 additionalDocumentSchema.index({ reviewedBy: 1 });
 
-const additionalDocumentModel=mongoos.model('additionalDocument',additionalDocumentSchema);
+const additionalDocumentModel = mongoose.model('additionalDocument', additionalDocumentSchema);
 
-module.exports={
-  additionalDocumentModel
-}
+module.exports = {
+    additionalDocumentModel
+};

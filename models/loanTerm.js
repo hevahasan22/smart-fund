@@ -26,7 +26,7 @@ const loanTermSchema=new mongoose.Schema({
 })
 
   
-const loanTermModel=mongoose.model('loanTerm',loanTermSchema)
+const loanTermModel=mongoose.model('LoanTerm',loanTermSchema) // Capital L and T
 module.exports={
   loanTermModel
 }

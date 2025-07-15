@@ -1,5 +1,6 @@
 const { additionalDocumentModel } = require('../models/additionalDocument');
 const { additionalDocumentTypeModel } = require('../models/additionalDocumentType');
+const { documentTypeTermRelationModel } = require('../models/documentTypeTermRelation');
 const { Contract } = require('../models/contract');
 const { User } = require('../models/user');
 const cloudinary = require('../utils/cloudinary');
@@ -7,22 +8,54 @@ const notificationService = require('../services/notificationService');
 const multer = require('multer');
 
 // Configure Multer for file uploads
+// Expected field name: 'documentFile'
 const storage = multer.memoryStorage();
-const upload = multer({ storage }).single('documentFile');
+const upload = multer({ 
+  storage,
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = [
+      'image/jpeg',
+      'image/png', 
+      'image/gif',
+      'image/webp',
+      'application/pdf',
+    ];
+    if (allowedTypes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Only images and PDFs are allowed'), false);
+    }
+  },
+  limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
+}).single('documentFile');
 
 exports.handleUpload = upload; // Export middleware for use in routes
 
 // Upload document for a contract
 exports.uploadDocument = async (req, res) => {
   try {
-    const { contractID } = req.body;
+    const { contractID } = req.params;
+    const { documentName } = req.body; // <-- get documentName from body
     const file = req.file;
     const userId = req.user.id;
     
-    console.log(`Document upload request - Contract: ${contractID}, Type: ${typeID}, User: ${userId}`);
+    if (!documentName) {
+      return res.status(400).json({ error: 'documentName is required' });
+    }
     
     if (!file) {
-      return res.status(400).json({ error: 'No file uploaded' });
+      return res.status(400).json({ 
+        error: 'No file uploaded',
+        message: 'Please upload a file using the field name "documentFile"',
+        expectedField: 'documentFile',
+        example: 'Use FormData with field name "documentFile" for the file'
+      });
+    }
+    
+    // Find the document type by documentName
+    const docType = await additionalDocumentTypeModel.findOne({ documentName });
+    if (!docType) {
+      return res.status(404).json({ error: 'Document type not found for the given documentName' });
     }
     
     // Validate contract exists and user has access
@@ -44,16 +77,19 @@ exports.uploadDocument = async (req, res) => {
       });
     }
     
-    // Validate document type exists and is required for this contract
-    const docType = await additionalDocumentTypeModel.findById(typeID);
-    if (!docType) {
-      return res.status(404).json({ error: 'Document type not found' });
-    }
+    // Check if document type is applicable for this contract's type term
+    const docTypeRelation = await documentTypeTermRelationModel.findOne({
+      documentTypeID: docType._id,
+      typeTermID: contract.typeTermID
+    });
     
-    // Check if document type is required for this contract's loan type
-    if (!docType.typeTermID.equals(contract.typeTermID)) {
+    if (!docTypeRelation) {
       return res.status(400).json({ error: 'Document type not applicable to this contract' });
     }
+    
+    const typeID = docType._id;
+    
+    console.log(`Document upload request - Contract: ${contractID}, Type: ${typeID}, User: ${userId}`);
     
     // Check if document already exists for this type and contract
     const existingDoc = await additionalDocumentModel.findOne({
@@ -121,8 +157,6 @@ exports.getDocumentsByContract = async (req, res) => {
     const { contractID } = req.params;
     const userId = req.user.id;
     
-    console.log(`Getting documents for contract ${contractID} by user ${userId}`);
-    
     // Validate contract exists
     const contract = await Contract.findById(contractID);
     if (!contract) {
@@ -140,21 +174,15 @@ exports.getDocumentsByContract = async (req, res) => {
     
     const documents = await additionalDocumentModel.find({ contractID })
       .populate('typeID')
-      .populate('uploadedBy', 'userFirstName userLastName email')
-      .populate('reviewedBy', 'userFirstName userLastName')
       .sort({ uploadedAt: -1 });
-    
-    console.log(`Found ${documents.length} documents for contract ${contractID}`);
     
     res.json({
       contractId: contractID,
       documents: documents.map(doc => ({
         id: doc._id,
-        type: doc.typeID.documentName,
+        type: doc.typeID?.documentName || '',
         status: doc.status,
-        uploadedBy: doc.uploadedBy,
         uploadedAt: doc.uploadedAt,
-        reviewedBy: doc.reviewedBy,
         reviewedAt: doc.reviewedAt,
         rejectionReason: doc.rejectionReason,
         adminNotes: doc.adminNotes,
@@ -176,7 +204,7 @@ exports.deleteDocument = async (req, res) => {
     console.log(`Delete document request - Document: ${id}, User: ${userId}`);
     
     const document = await additionalDocumentModel.findById(id)
-      .populate('contractID');
+      .populate({ path: 'contractID', model: 'Contract' });
     
     if (!document) {
       return res.status(404).json({ error: 'Document not found' });
@@ -227,13 +255,9 @@ exports.getDocument = async (req, res) => {
     const { id } = req.params;
     const userId = req.user.id;
     
-    console.log(`Getting document ${id} for user ${userId}`);
-    
     const document = await additionalDocumentModel.findById(id)
       .populate('typeID')
-      .populate('contractID')
-      .populate('uploadedBy', 'userFirstName userLastName email')
-      .populate('reviewedBy', 'userFirstName userLastName');
+      .populate({ path: 'contractID', model: 'Contract' });
       
     if (!document) {
       return res.status(404).json({ error: 'Document not found' });
@@ -251,11 +275,9 @@ exports.getDocument = async (req, res) => {
     
     res.json({
       id: document._id,
-      type: document.typeID.documentName,
+      type: document.typeID?.documentName || '',
       status: document.status,
-      uploadedBy: document.uploadedBy,
       uploadedAt: document.uploadedAt,
-      reviewedBy: document.reviewedBy,
       reviewedAt: document.reviewedAt,
       rejectionReason: document.rejectionReason,
       adminNotes: document.adminNotes,

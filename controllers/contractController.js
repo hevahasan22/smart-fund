@@ -12,6 +12,7 @@ const { loanTypeModel } = require('../models/loanType');
 const { typetermModel } = require('../models/typeterm');
 const { additionalDocumentTypeModel } = require('../models/additionalDocumentType');
 const { additionalDocumentModel } = require('../models/additionalDocument');
+const { documentTypeTermRelationModel } = require('../models/documentTypeTermRelation');
 
 exports.createContract = async (req, res) => {
   try {
@@ -171,11 +172,18 @@ exports.createContract = async (req, res) => {
       });
     }
 
-    // 8. Get required document types
-    const requiredDocTypes = await additionalDocumentTypeModel.find({
+    // 8. Get required document types using junction table
+    const requiredDocTypeRelations = await documentTypeTermRelationModel.find({
       typeTermID: typeTerm._id,
       isRequired: true
-    });
+    }).populate('documentTypeID');
+
+    const requiredDocTypes = requiredDocTypeRelations.map(relation => ({
+      _id: relation.documentTypeID._id,
+      documentName: relation.documentTypeID.documentName,
+      description: relation.documentTypeID.description,
+      isRequired: relation.isRequired
+    }));
 
     console.log(`Found ${requiredDocTypes.length} required document types for this loan type`);
 
@@ -616,14 +624,21 @@ const processSingleContract = async (contract) => {
   console.log(`Processing contract ${contract._id}...`);
   
   // 1. Check all required documents are approved by admin
-  const requiredDocTypes = await additionalDocumentTypeModel.find({
+  const requiredDocTypes = await documentTypeTermRelationModel.find({
     typeTermID: contract.typeTermID,
     isRequired: true
-  });
+  }).populate('documentTypeID');
+
+  const requiredDocTypesList = requiredDocTypes.map(relation => ({
+    _id: relation.documentTypeID._id,
+    documentName: relation.documentTypeID.documentName,
+    description: relation.documentTypeID.description,
+    isRequired: relation.isRequired
+  }));
   
-  console.log(`Found ${requiredDocTypes.length} required document types`);
+  console.log(`Found ${requiredDocTypesList.length} required document types`);
   
-  if (requiredDocTypes.length > 0) {
+  if (requiredDocTypesList.length > 0) {
     const documents = await additionalDocumentModel.find({ 
       contractID: contract._id 
     });
@@ -631,7 +646,7 @@ const processSingleContract = async (contract) => {
     console.log(`Found ${documents.length} uploaded documents`);
     
     // Check if all required documents are approved (only approved status is accepted)
-    const allApproved = requiredDocTypes.every(docType => 
+    const allApproved = requiredDocTypesList.every(docType => 
       documents.some(doc => 
         doc.typeID.equals(docType._id) && doc.status === 'approved'
       )
@@ -641,7 +656,7 @@ const processSingleContract = async (contract) => {
       console.log('Contract processing paused: Waiting for admin document approval');
       
       // Find which documents are missing or not approved
-      const pendingDocs = requiredDocTypes.filter(docType => {
+      const pendingDocs = requiredDocTypesList.filter(docType => {
         const doc = documents.find(d => doc.typeID.equals(docType._id));
         return !doc || doc.status !== 'approved';
       });
@@ -1096,21 +1111,23 @@ exports.getRequiredDocuments = async (req, res) => {
     }
     
     // Get required documents for this typeterm
-    const requiredDocuments = await additionalDocumentTypeModel.find({
+    const requiredDocuments = await documentTypeTermRelationModel.find({
       typeTermID: typeTerm._id,
       isRequired: true
-    });
+    }).populate('documentTypeID');
+
+    const requiredDocumentsList = requiredDocuments.map(relation => ({
+      _id: relation.documentTypeID._id,
+      documentName: relation.documentTypeID.documentName,
+      description: relation.documentTypeID.description,
+      isRequired: relation.isRequired
+    }));
     
     res.json({
       loanTypeId,
       typeTermId: typeTerm._id,
-      requiredDocuments: requiredDocuments.map(doc => ({
-        id: doc._id,
-        name: doc.documentName,
-        description: doc.description || 'No description available',
-        isRequired: doc.isRequired
-      })),
-      totalRequired: requiredDocuments.length
+      requiredDocuments: requiredDocumentsList,
+      totalRequired: requiredDocumentsList.length
     });
   } catch (error) {
     console.error('Error getting required documents:', error);
