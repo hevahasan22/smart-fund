@@ -32,7 +32,7 @@ const contractSchema = new mongoose.Schema({
     },
     typeTermID: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'typeterm',
+        ref: 'TypeTerm',
         required: true
     },
     // Temporary loan details - will be moved to loan model after approval

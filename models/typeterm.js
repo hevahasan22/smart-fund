@@ -8,13 +8,13 @@ const typetermSchema=new mongoose.Schema({
     loanTypeID:
     {
         type:mongoose.Schema.Types.ObjectId,
-        ref:'loanType',
+        ref:'LoanType',
         required:true
     },
     loanTermID:
     {
         type:mongoose.Schema.Types.ObjectId,
-        ref:'loanTerm',
+        ref:'LoanTerm',
         required:true
     } ,
       interestRate:{

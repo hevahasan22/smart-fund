@@ -20,7 +20,7 @@ const loanTypeSchema=new mongoose.Schema({
   },{timestamps:true}
 )
 
-const loanTypeModel=mongoose.model('LoanType',loanTypeSchema) // Capital L and T
+const loanTypeModel=mongoose.model('LoanType',loanTypeSchema) 
 module.exports={
   loanTypeModel
 }
