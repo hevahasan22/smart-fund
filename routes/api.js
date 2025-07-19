@@ -5,7 +5,6 @@ const asyncHandler = require('../middleware/asyncHandler'); // Recommended inste
 // Import route handlers
 const userRoutes = require('./userAuth');
 const uploadRoutes = require('./upload');
-const sponsorRoutes = require('./sponsor');
 const contractRoutes = require('./contract');
 const paymentRoutes = require('./payment');
 const loanRoutes = require('./loan');
@@ -21,7 +20,6 @@ const relationRoutes=require('./documentTypeTermRelation');
 // Mount routes with proper error handling
 router.use('/upload', asyncHandler(uploadRoutes));
 router.use('/users', asyncHandler(userRoutes));
-router.use('/sponsors', asyncHandler(sponsorRoutes));
 router.use('/contracts', asyncHandler(contractRoutes));
 router.use('/payments', asyncHandler(paymentRoutes));
 router.use('/loans', asyncHandler(loanRoutes));

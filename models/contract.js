@@ -17,12 +17,12 @@ const contractSchema = new mongoose.Schema({
     },
     userID: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'user',
+        ref: 'User',
         required: true,
     },
     sponsorID_1: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'user',
+        ref: 'User',
         required: true
     },
     sponsorID_2: {
@@ -32,7 +32,7 @@ const contractSchema = new mongoose.Schema({
     },
     typeTermID: {
         type: mongoose.Schema.Types.ObjectId,
-        ref: 'TypeTerm',
+        ref: 'typeterm', // changed from 'TypeTerm' to 'typeterm'
         required: true
     },
     // Temporary loan details - will be moved to loan model after approval

@@ -5,31 +5,7 @@ const { Contract } = require('../models/contract');
 const { User } = require('../models/user');
 const cloudinary = require('../utils/cloudinary');
 const notificationService = require('../services/notificationService');
-const multer = require('multer');
-
-// Configure Multer for file uploads
-// Expected field name: 'documentFile'
-const storage = multer.memoryStorage();
-const upload = multer({ 
-  storage,
-  fileFilter: (req, file, cb) => {
-    const allowedTypes = [
-      'image/jpeg',
-      'image/png', 
-      'image/gif',
-      'image/webp',
-      'application/pdf',
-    ];
-    if (allowedTypes.includes(file.mimetype)) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only images and PDFs are allowed'), false);
-    }
-  },
-  limits: { fileSize: 5 * 1024 * 1024 } // 5MB limit
-}).single('documentFile');
-
-exports.handleUpload = upload; // Export middleware for use in routes
+const upload=require('../middleware/multer')
 
 // Upload document for a contract
 exports.uploadDocument = async (req, res) => {
