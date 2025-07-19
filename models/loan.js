@@ -7,8 +7,8 @@ const loanSchema=new mongoose.Schema({
         required:true,
         validate: {
           validator: async function(value) {
-            const loanType = await mongoose.model('LoanType').findById(this.typeTermID.loanTypeID);
-            return value >= loanType.minAmount && value <= loanType.maxAmount;
+            const typeTerm = await mongoose.model('typeterm').findById(this.typeTermID);
+            return value >= typeTerm.minAmount && value <= typeTerm.maxAmount;
           },
           message: 'Loan amount is outside the allowed range'
         }
