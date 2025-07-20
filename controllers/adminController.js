@@ -603,9 +603,9 @@ const checkContractDocumentCompletion = async (contractId) => {
     );
     
     if (allApproved) {
-      console.log(`All documents approved for contract ${contractId}, triggering contract processing`);
+      console.log(`All documents approved for contract ${contractId}, triggering sponsor approval requests`);
       
-      // Update contract status to pending processing if it was waiting for documents
+      // Update contract status to pending_sponsor_approval if it was waiting for documents
       if (contract.status === 'pending_document_approval') {
         contract.status = 'pending_sponsor_approval';
         await contract.save();
@@ -613,9 +613,39 @@ const checkContractDocumentCompletion = async (contractId) => {
         // Notify user that all documents are approved and contract is proceeding
         await notificationService.sendContractDocumentCompletionNotification(contract.userID, contract._id);
         
-        // Trigger contract processing
-        const { processContractApproval } = require('./contractController');
-        await processContractApproval(contract);
+        // Add contract to sponsors' pending approvals and send notifications
+        const User = require('../models/user').User;
+        const borrower = await User.findById(contract.userID);
+        const sponsor1 = await User.findById(contract.sponsorID_1);
+        const sponsor2 = await User.findById(contract.sponsorID_2);
+        const loanTypeRecord = contract.typeTermID.loanTypeID ? contract.typeTermID.loanTypeID : undefined;
+        const loanDetails = {
+          type: loanTypeRecord ? loanTypeRecord.loanName : '',
+          amount: contract.tempLoanAmount,
+          term: `${contract.tempLoanTermMonths} months`
+        };
+        await Promise.all([
+          User.findByIdAndUpdate(sponsor1._id, {
+            $push: {
+              pendingApprovals: {
+                contractId: contract._id,
+                borrowerId: contract.userID,
+                requestedAt: new Date()
+              }
+            }
+          }),
+          User.findByIdAndUpdate(sponsor2._id, {
+            $push: {
+              pendingApprovals: {
+                contractId: contract._id,
+                borrowerId: contract.userID,
+                requestedAt: new Date()
+              }
+            }
+          }),
+          notificationService.sendSponsorRequest(sponsor1, borrower, loanDetails),
+          notificationService.sendSponsorRequest(sponsor2, borrower, loanDetails)
+        ]);
       }
     } else {
       console.log(`Not all documents approved for contract ${contractId}`);

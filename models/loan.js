@@ -47,6 +47,10 @@ const loanSchema=new mongoose.Schema({
           message: 'Loan end date is invalid for the selected term'
         }
     },
+    interestRate: {
+        type: Number,
+        required: true
+    },
     typeTermID:
     {
         type:mongoose.Schema.Types.ObjectId,

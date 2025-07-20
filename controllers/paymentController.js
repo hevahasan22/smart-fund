@@ -1,6 +1,4 @@
-const Payment = require('../models/payment');
-const Loan = require('../models/loan');
-const User = require('../models/user');
+const {Payment,Loan,User,Contract} = require('../models/index');
 const cron = require('node-cron');
 const moment = require('moment');
 

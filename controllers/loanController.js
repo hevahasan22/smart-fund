@@ -1,32 +1,47 @@
-const Loan = require('../models/loan');
-const Payment = require('../models/payment');
-const TypeTerm = require('../models/typeterm');
+const {Loan,Payment,typetermModel,Contract} = require('../models/index');
 
-exports.createLoan = async (contract) => {
+const createLoan = async (contract) => {
   try {
     // Get the typeTerm details to access interestRate
-    const typeTerm = await TypeTerm.findById(contract.typeTermID)
+    const typeTerm = await typetermModel.findById(contract.typeTermID)
       .populate('loanTypeID')
       .populate('loanTermID');
     
     if (!typeTerm) throw new Error('TypeTerm combination not found');
     
     // Calculate end date based on contract's term months
-    const endDate = new Date(contract.startDate);
-    endDate.setMonth(endDate.getMonth() + contract.loanTermMonths);
+    const endDate = new Date(contract.tempStartDate);
+    endDate.setMonth(endDate.getMonth() + contract.tempLoanTermMonths);
     
     // Create loan
     const loan = new Loan({
       typeTermID: contract.typeTermID,
-      loanAmount: contract.loanAmount,
-      loanTermMonths: contract.loanTermMonths,
-      startDate: contract.startDate,
+      loanAmount: contract.tempLoanAmount,
+      loanTermMonths: contract.tempLoanTermMonths,
+      startDate: contract.tempStartDate,
       endDate,
-      status: 'active'
+      status: 'active',
+      interestRate: typeTerm.interestRate
     });
     
     await loan.save();
     
+    // Defensive check before creating payment schedule
+    console.log('Creating payment schedule:', {
+      loanAmount: loan.loanAmount,
+      interestRate: loan.interestRate,
+      termMonths: loan.loanTermMonths
+    });
+    if (
+      typeof loan.loanAmount !== 'number' ||
+      typeof loan.interestRate !== 'number' ||
+      typeof loan.loanTermMonths !== 'number' ||
+      isNaN(loan.loanAmount) ||
+      isNaN(loan.interestRate) ||
+      isNaN(loan.loanTermMonths)
+    ) {
+      throw new Error('Invalid input for payment calculation');
+    }
     // Create payment schedule
     await createPaymentSchedule(loan, loan.loanTermMonths);
     
@@ -146,4 +161,10 @@ const calculateMonthlyPayment = (principal, annualRate, termMonths) => {
   return principal * 
     (monthlyRate * Math.pow(1 + monthlyRate, termMonths)) / 
     (Math.pow(1 + monthlyRate, termMonths) - 1);
+};
+
+module.exports = {
+  createLoan,
+  getUserLoans: exports.getUserLoans,
+  getLoanById: exports.getLoanById
 };

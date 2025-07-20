@@ -46,7 +46,7 @@ exports.uploadDocument = async (req, res) => {
     }
     
     // Check if contract is in a state where documents can be uploaded
-    if (!['pending_sponsor_approval', 'pending_processing', 'pending_document_approval'].includes(contract.status)) {
+    if (!['pending_sponsor_approval', 'pending_processing', 'pending_document_approval','pending'].includes(contract.status)) {
       return res.status(400).json({ 
         error: 'Documents cannot be uploaded at this stage',
         currentStatus: contract.status

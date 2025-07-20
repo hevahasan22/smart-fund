@@ -197,9 +197,16 @@ exports.createContract = async (req, res) => {
       tempLoanTermMonths: loanTermMonths,
       tempStartDate: new Date(),
       employmentStatus,
-      status: 'pending_sponsor_approval', 
+      // status will be set below
       priority: loanTypeRecord.priority
     });
+
+    // Set status based on document requirements
+    if (requiredDocTypes.length > 0) {
+      contract.status = 'pending_document_approval';
+    } else {
+      contract.status = 'pending_sponsor_approval';
+    }
 
     await contract.save();
 
@@ -302,33 +309,6 @@ exports.createContract = async (req, res) => {
       term: `${loanTermMonths} months`
     };
 
-    // Add contract to sponsors' pending approvals and send notifications
-    await Promise.all([
-      // Add to sponsor1's pending approvals
-      User.findByIdAndUpdate(sponsor1._id, {
-        $push: {
-          pendingApprovals: {
-            contractId: contract._id,
-            borrowerId: userId,
-            requestedAt: new Date()
-          }
-        }
-      }),
-      // Add to sponsor2's pending approvals
-      User.findByIdAndUpdate(sponsor2._id, {
-        $push: {
-          pendingApprovals: {
-            contractId: contract._id,
-            borrowerId: userId,
-            requestedAt: new Date()
-          }
-        }
-      }),
-      // Send dual notifications (in-app + email) to both sponsors
-      notificationService.sendSponsorRequest(sponsor1, borrower, loanDetails),
-      notificationService.sendSponsorRequest(sponsor2, borrower, loanDetails)
-    ]);
-    
     // 10. Set contract status based on document requirements
     if (requiredDocTypes.length > 0) {
       // If documents are required, contract waits for admin approval of documents
@@ -343,8 +323,33 @@ exports.createContract = async (req, res) => {
       });
     } else {
       // If no documents required, start sponsor approval process immediately
+      // Add contract to sponsors' pending approvals and send notifications
+      await Promise.all([
+        // Add to sponsor1's pending approvals
+        User.findByIdAndUpdate(sponsor1._id, {
+          $push: {
+            pendingApprovals: {
+              contractId: contract._id,
+              borrowerId: userId,
+              requestedAt: new Date()
+            }
+          }
+        }),
+        // Add to sponsor2's pending approvals
+        User.findByIdAndUpdate(sponsor2._id, {
+          $push: {
+            pendingApprovals: {
+              contractId: contract._id,
+              borrowerId: userId,
+              requestedAt: new Date()
+            }
+          }
+        }),
+        // Send dual notifications (in-app + email) to both sponsors
+        notificationService.sendSponsorRequest(sponsor1, borrower, loanDetails),
+        notificationService.sendSponsorRequest(sponsor2, borrower, loanDetails)
+      ]);
       processContractApproval(contract);
-      
       res.status(201).json({
         message: 'Contract created successfully. Waiting for sponsor approvals.',
         contract,
@@ -742,24 +747,11 @@ const processSingleContract = async (contract) => {
   contract.status = 'approved';
   contract.approvedAt = new Date();
   await contract.save();
-  
-  // 5. Create loan after approval
-  const loan = new Loan({
-    loanAmount: contract.tempLoanAmount,
-    loanTermMonths: contract.tempLoanTermMonths,
-    startDate: contract.tempStartDate,
-    typeTermID: contract.typeTermID,
-    status: 'active'
-  });
-  
-  // Calculate end date
-  const endDate = new Date(contract.tempStartDate);
-  endDate.setMonth(endDate.getMonth() + contract.tempLoanTermMonths);
-  loan.endDate = endDate;
-  
-  await loan.save();
-  console.log(`Loan created: ${loan._id}`);
-  
+
+  // 5. Create loan after approval using loanController
+  const { createLoan } = require('./loanController');
+  const loan = await createLoan(contract);
+
   // Link loan to contract
   contract.loanID = loan._id;
   await contract.save();
@@ -771,7 +763,7 @@ const processSingleContract = async (contract) => {
     notificationService.sendContractApprovalNotification(contract.sponsorID_1, contract._id),
     notificationService.sendContractApprovalNotification(contract.sponsorID_2, contract._id)
   ]);
-  
+
   console.log(`Contract ${contract._id} successfully approved and loan created`);
 };
 
