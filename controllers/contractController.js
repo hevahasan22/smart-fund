@@ -349,7 +349,7 @@ exports.createContract = async (req, res) => {
         notificationService.sendSponsorRequest(sponsor1, borrower, loanDetails),
         notificationService.sendSponsorRequest(sponsor2, borrower, loanDetails)
       ]);
-      processContractApproval(contract);
+      await processContractApproval(contract);
       res.status(201).json({
         message: 'Contract created successfully. Waiting for sponsor approvals.',
         contract,
@@ -449,7 +449,7 @@ exports.approveContractAsSponsor = async (req, res) => {
       
       // Start approval process
       console.log(`Calling processContractApproval for contract ${contract._id}`);
-      processContractApproval(contract);
+      await processContractApproval(contract);
     } else {
       console.log(`Partial approval for contract ${contract._id} - Sponsor1: ${contract.sponsor1Approved}, Sponsor2: ${contract.sponsor2Approved}`);
       await contract.save();
@@ -627,6 +627,12 @@ const processPendingContracts = async () => {
 // Process a single contract
 const processSingleContract = async (contract) => {
   console.log(`Processing contract ${contract._id}...`);
+
+  // Prevent duplicate loan creation
+  if (contract.loanID) {
+    console.log('Loan already created for this contract, skipping...');
+    return;
+  }
   
   // 1. Check all required documents are approved by admin
   const requiredDocTypes = await documentTypeTermRelationModel.find({

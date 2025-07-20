@@ -20,7 +20,11 @@ const loanSchema=new mongoose.Schema({
         min: [1, 'Loan term must be at least 1 month'],
         validate: {
           validator: async function(value) {
-            const loanTerm = await mongoose.model('LoanTerm').findById(this.typeTermID.loanTermID);
+            // Fetch typeterm document
+            const typeTerm = await mongoose.model('typeterm').findById(this.typeTermID);
+            if (!typeTerm || !typeTerm.loanTermID) return false;
+            // Fetch LoanTerm document
+            const loanTerm = await mongoose.model('LoanTerm').findById(typeTerm.loanTermID);
             if (!loanTerm) return false; // Loan term not found
             return value >= loanTerm.minTerm && value <= loanTerm.maxTerm;
           },
@@ -38,7 +42,11 @@ const loanSchema=new mongoose.Schema({
         required:true,
         validate: {
           validator: async function(value) {
-            const loanTerm = await mongoose.model('LoanTerm').findById(this.typeTermID.loanTermID);
+            // Fetch typeterm document
+            const typeTerm = await mongoose.model('typeterm').findById(this.typeTermID);
+            if (!typeTerm || !typeTerm.loanTermID) return false;
+            // Fetch LoanTerm document
+            const loanTerm = await mongoose.model('LoanTerm').findById(typeTerm.loanTermID);
             if (!loanTerm) return false; // Loan term not found
             const minEndDate = new Date(this.startDate);
             minEndDate.setMonth(minEndDate.getMonth() + loanTerm.minTerm);

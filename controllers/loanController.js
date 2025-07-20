@@ -111,6 +111,13 @@ exports.getLoanById = async (req, res) => {
       return res.status(404).json({ error: 'Loan not found' });
     }
 
+    // Ensure loan status is 'completed' if all payments are paid
+    const allPaid = loan.payments.length > 0 && loan.payments.every(payment => payment.status === 'paid');
+    if (allPaid && loan.status !== 'completed') {
+      loan.status = 'completed';
+      await loan.save();
+    }
+
     // Calculate loan summary
     const totalAmount = loan.loanAmount;
     const paidAmount = loan.payments.reduce((sum, payment) => 

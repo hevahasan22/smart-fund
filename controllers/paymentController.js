@@ -88,11 +88,23 @@ exports.processPayment = async (req, res) => {
       return res.status(400).json({ error: 'Payment ID is required' });
     }
 
+    // Fetch the user making the payment
+    const user = await User.findById(userId);
+
     // Get payment and related loan
     const payment = await Payment.findById(paymentId).populate('loanID');
     
     if (!payment) {
       return res.status(404).json({ error: 'Payment not found' });
+    }
+
+    // Prevent double payment
+    if (payment.status === 'paid') {
+      return res.status(400).json({ error: 'This payment has already been paid.' });
+    }
+    // Optionally, prevent paying non-pending payments
+    if (payment.status !== 'pending') {
+      return res.status(400).json({ error: 'This payment cannot be paid in its current status.' });
     }
 
     const loan = payment.loanID;
@@ -113,7 +125,7 @@ exports.processPayment = async (req, res) => {
       return res.status(403).json({ error: 'Unauthorized to make this payment' });
     }
 
-    // Update payment status
+    // All checks passed, now mark as paid
     payment.status = 'paid';
     payment.paidAt = new Date();
     await payment.save();
@@ -135,7 +147,7 @@ exports.processPayment = async (req, res) => {
       loanId: loan._id,
       amount: payment.amount,
       paidAt: payment.paidAt,
-      paidBy: userId,
+      paidBy: user.userFirstName + ' ' + user.userLastName, // Use correct field names
       loanStatus: loan.status
     };
 
