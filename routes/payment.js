@@ -4,7 +4,7 @@ const paymentController = require('../controllers/paymentController');
 const { authenticate, requireAdmin } = require('../middleware/auth');
 
 // Process payment via QR confirmation
-router.post('/process', 
+router.post('/process/:paymentId', 
     authenticate, 
     paymentController.processPayment
 );

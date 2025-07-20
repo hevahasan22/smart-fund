@@ -61,7 +61,7 @@ const contractSchema = new mongoose.Schema({
     },
     loanID: { 
         type: mongoose.Schema.Types.ObjectId, 
-        ref: 'loan'
+        ref: 'Loan'
     },
     priority: {
         type: Number,

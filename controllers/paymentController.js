@@ -80,7 +80,7 @@ const checkLatePayments = async () => {
 // Process payment via QR confirmation
 exports.processPayment = async (req, res) => {
   try {
-    const { paymentId } = req.body;
+    const { paymentId } = req.params;
     const userId = req.user.id;
 
     // Validate input
@@ -89,10 +89,7 @@ exports.processPayment = async (req, res) => {
     }
 
     // Get payment and related loan
-    const payment = await Payment.findById(paymentId).populate({
-      path: 'loanID',
-      populate: { path: 'userID' }
-    });
+    const payment = await Payment.findById(paymentId).populate('loanID');
     
     if (!payment) {
       return res.status(404).json({ error: 'Payment not found' });
@@ -100,9 +97,15 @@ exports.processPayment = async (req, res) => {
 
     const loan = payment.loanID;
 
+    // Find contract by loanID
+    const contract = await Contract.findOne({ loanID: loan._id });
+    if (!contract) {
+      return res.status(404).json({ error: 'Contract not found for this loan' });
+    }
+    const borrowerId = contract.userID;
+
     // Verify authorization - borrower or sponsors can pay
-    const contract = await Contract.findById(loan.contractID);
-    const isBorrower = loan.userID._id.equals(userId);
+    const isBorrower = borrowerId.equals(userId);
     const isSponsor1 = contract?.sponsorID_1.equals(userId);
     const isSponsor2 = contract?.sponsorID_2.equals(userId);
 
@@ -122,7 +125,7 @@ exports.processPayment = async (req, res) => {
     });
 
     if (remainingPayments === 0) {
-      loan.status = 'paid';
+      loan.status = 'completed';
       await loan.save();
     }
 

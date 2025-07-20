@@ -21,9 +21,10 @@ const loanSchema=new mongoose.Schema({
         validate: {
           validator: async function(value) {
             const loanTerm = await mongoose.model('LoanTerm').findById(this.typeTermID.loanTermID);
+            if (!loanTerm) return false; // Loan term not found
             return value >= loanTerm.minTerm && value <= loanTerm.maxTerm;
           },
-          message: 'Loan term is outside the allowed duration'
+          message: 'Loan term is outside the allowed duration or loan term not found'
         }
     },
     startDate:
@@ -38,13 +39,14 @@ const loanSchema=new mongoose.Schema({
         validate: {
           validator: async function(value) {
             const loanTerm = await mongoose.model('LoanTerm').findById(this.typeTermID.loanTermID);
+            if (!loanTerm) return false; // Loan term not found
             const minEndDate = new Date(this.startDate);
             minEndDate.setMonth(minEndDate.getMonth() + loanTerm.minTerm);
             const maxEndDate = new Date(this.startDate);
             maxEndDate.setMonth(maxEndDate.getMonth() + loanTerm.maxTerm);
             return value >= minEndDate && value <= maxEndDate;
           },
-          message: 'Loan end date is invalid for the selected term'
+          message: 'Loan end date is invalid for the selected term or loan term not found'
         }
     },
     interestRate: {

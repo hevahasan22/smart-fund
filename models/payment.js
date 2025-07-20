@@ -14,7 +14,7 @@ const paymentSchema=new mongoose.Schema({
         type: Number,
         required: true
     },
-    statues:
+    status:
     {
         type: String, 
         enum: ['pending', 'paid', 'late'], 
@@ -23,7 +23,7 @@ const paymentSchema=new mongoose.Schema({
     loanID:
     {
         type:mongoose.Schema.Types.ObjectId,
-        ref:'loan',
+        ref:'Loan',
         required:true
     }
   },
