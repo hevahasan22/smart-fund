@@ -14,6 +14,40 @@ const { additionalDocumentTypeModel } = require('../models/additionalDocumentTyp
 const { additionalDocumentModel } = require('../models/additionalDocument');
 const { documentTypeTermRelationModel } = require('../models/documentTypeTermRelation');
 
+// Helper to transform contract for user response (no IDs, only names)
+function contractToUserView(contract) {
+  // Defensive: handle both Mongoose docs and plain objects
+  const get = (obj, path, fallback = undefined) => {
+    return path.split('.').reduce((o, k) => (o && o[k] !== undefined ? o[k] : fallback), obj);
+  };
+  return {
+    status: contract.status,
+    employmentStatus: contract.employmentStatus,
+    sponsor1: contract.sponsorID_1 ? {
+      firstName: get(contract, 'sponsorID_1.userFirstName'),
+      lastName: get(contract, 'sponsorID_1.userLastName')
+    } : undefined,
+    sponsor2: contract.sponsorID_2 ? {
+      firstName: get(contract, 'sponsorID_2.userFirstName'),
+      lastName: get(contract, 'sponsorID_2.userLastName')
+    } : undefined,
+    typeTerm: contract.typeTermID ? {
+      name: get(contract, 'typeTermID.name'),
+      loanType: get(contract, 'typeTermID.loanTypeID.loanName'),
+      loanTerm: get(contract, 'typeTermID.loanTermID.type')
+    } : undefined,
+    loanAmount: contract.tempLoanAmount,
+    loanTermMonths: contract.tempLoanTermMonths,
+    startDate: contract.tempStartDate,
+    sponsor1Approved: contract.sponsor1Approved,
+    sponsor2Approved: contract.sponsor2Approved,
+    priority: contract.priority,
+    approvedAt: contract.approvedAt,
+    rejectionReason: contract.rejectionReason,
+    // Add more fields as needed, but avoid IDs
+  };
+}
+
 exports.createContract = async (req, res) => {
   try {
     // Parse form data
@@ -317,7 +351,7 @@ exports.createContract = async (req, res) => {
       
       res.status(201).json({
         message: 'Contract created successfully. Documents uploaded and pending admin review.',
-        contract,
+        contract: contractToUserView(contract),
         documents: uploadedDocuments.map(doc => doc._id),
         nextStep: 'Admin will review your documents before sponsor approval process begins'
       });
@@ -352,7 +386,7 @@ exports.createContract = async (req, res) => {
       await processContractApproval(contract);
       res.status(201).json({
         message: 'Contract created successfully. Waiting for sponsor approvals.',
-        contract,
+        contract: contractToUserView(contract),
         documents: uploadedDocuments.map(doc => doc._id)
       });
     }
@@ -464,7 +498,7 @@ exports.approveContractAsSponsor = async (req, res) => {
     
     res.json({ 
       message: 'Sponsor approval recorded', 
-      contract,
+      contract: contractToUserView(contract),
       nextStatus: contract.status
     });
   } catch (error) {
@@ -521,7 +555,7 @@ exports.rejectContractAsSponsor = async (req, res) => {
       notificationService.sendContractRejectionNotification(contract.userID, contract._id, reason, false)
     ]);
     
-    res.json({ message: 'Contract rejected', contract });
+    res.json({ message: 'Contract rejected', contract: contractToUserView(contract) });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -851,7 +885,7 @@ exports.getUserContracts = async (req, res) => {
       };
     });
 
-    res.json(contractsWithLoanDetails);
+    res.json(contractsWithLoanDetails.map(contractToUserView));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -886,7 +920,7 @@ exports.getSponsorContracts = async (req, res) => {
       };
     });
 
-    res.json(contractsWithLoanDetails);
+    res.json(contractsWithLoanDetails.map(contractToUserView));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -995,16 +1029,14 @@ exports.getPendingApprovals = async (req, res) => {
         console.warn('Contract not found for approval:', approval._id);
         return null;
       }
-      
       return {
         id: approval._id,
-        contract: {
-          ...contract.toObject(),
-          loanAmount: contract.tempLoanAmount,
-          loanTermMonths: contract.tempLoanTermMonths,
-          startDate: contract.tempStartDate
-        },
-        borrower: approval.borrowerId,
+        contract: contractToUserView(contract),
+        borrower: approval.borrowerId ? {
+          firstName: approval.borrowerId.userFirstName,
+          lastName: approval.borrowerId.userLastName,
+          email: approval.borrowerId.email
+        } : undefined,
         requestedAt: approval.requestedAt
       };
     }).filter(Boolean); // Remove null entries
