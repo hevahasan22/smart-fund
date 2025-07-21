@@ -17,6 +17,19 @@ const express = require('express');
        contractController.getUserContracts
      );
 
+       // Get user contracts (singular)
+       router.get(
+        '/my-contract/:id',
+        authenticate,
+        contractController.getUserContract
+      );
+      // Get user contracts (plural alias)
+      router.get(
+        '/my-contracts/:id',
+        authenticate,
+        contractController.getUserContract
+      );
+
      // Get sponsor contracts
      router.get(
        '/sponsor-contracts',

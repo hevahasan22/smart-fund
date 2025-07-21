@@ -891,6 +891,29 @@ exports.getUserContracts = async (req, res) => {
   }
 };
 
+// Get a single contract by ID
+exports.getUserContract = async (req, res) => {
+  try {
+    const contractId = req.params.id;
+    const contract = await Contract.findById(contractId)
+      .populate('sponsorID_1', 'userFirstName userLastName')
+      .populate('sponsorID_2', 'userFirstName userLastName')
+      .populate({
+        path: 'typeTermID',
+        populate: [
+          { path: 'loanTypeID', select: 'loanName minAmount maxAmount priority' },
+          { path: 'loanTermID', select: 'termName minTerm maxTerm' }
+        ]
+      });
+    if (!contract) {
+      return res.status(404).json({ error: 'Contract not found' });
+    }
+    res.json(contractToUserView(contract));
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
 // Get all contracts where the user is a sponsor
 exports.getSponsorContracts = async (req, res) => {
   try {
