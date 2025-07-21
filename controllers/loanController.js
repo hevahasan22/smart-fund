@@ -225,8 +225,50 @@ const calculateMonthlyPayment = (principal, annualRate, termMonths) => {
     (Math.pow(1 + monthlyRate, termMonths) - 1);
 };
 
+// Get the active loan for the logged-in user
+exports.getActiveLoanForUser = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // Find contracts for the user with a loanID set
+    const { Contract } = require('../models/contract');
+    const contracts = await Contract.find({ userID: userId, loanID: { $ne: null } });
+
+    // Get all loan IDs from these contracts
+    const loanIds = contracts.map(contract => contract.loanID).filter(Boolean);
+
+    // Find the active loan (assuming only one active at a time)
+    const loan = await Loan.findOne({ _id: { $in: loanIds }, status: 'active' });
+    if (!loan) return res.json(null);
+
+    // Fetch payments for this loan
+    const payments = await Payment.find({ loanID: loan._id }).sort({ dueDate: 1 });
+
+    // Calculate summary
+    const totalAmount = loan.loanAmount;
+    const paidAmount = payments.reduce((sum, payment) => payment.status === 'paid' ? sum + payment.amount : sum, 0);
+    const remainingAmount = totalAmount - paidAmount;
+
+    // Remove _id and __v from loan
+    const { _id, __v, ...loanWithoutIds } = loan.toObject();
+    // Remove _id and __v from each payment
+    const paymentsClean = payments.map(({ _id, __v, ...rest }) => rest);
+
+    res.json({
+      loan: loanWithoutIds,
+      totalAmount,
+      paidAmount,
+      remainingAmount,
+      paymentSchedule: paymentsClean
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
 module.exports = {
   createLoan,
   getUserLoans: exports.getUserLoans,
-  getLoanById: exports.getLoanById
+  getLoanById: exports.getLoanById,
+  getActiveLoanForUser: exports.getActiveLoanForUser
 };
