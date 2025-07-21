@@ -56,26 +56,51 @@ const createLoan = async (contract) => {
 exports.getUserLoans = async (req, res) => {
   try {
     const userId = req.user.id;
-    
-    const loans = await Loan.find({ userID: userId })
-      .populate({
-        path: 'contractID',
-        populate: [
-          { path: 'sponsorID_1', select: 'firstName lastName' },
-          { path: 'sponsorID_2', select: 'firstName lastName' },
-          { 
-            path: 'typeTermID',
-            populate: [
-              { path: 'loanTypeID', select: 'loanName' },
-              { path: 'loanTermID', select: 'termName' }
-            ]
-          }
-        ]
-      })
-      .populate('payments') // Assuming you have payments referenced in Loan model
+
+    // 1. Find all contracts for the user that have a loanID set
+    const { Contract } = require('../models/contract');
+    const contracts = await Contract.find({ userID: userId, loanID: { $ne: null } })
+      .populate([
+        { path: 'sponsorID_1', select: 'firstName lastName' },
+        { path: 'sponsorID_2', select: 'firstName lastName' },
+        {
+          path: 'typeTermID',
+          populate: [
+            { path: 'loanTypeID', select: 'loanName' },
+            { path: 'loanTermID', select: 'termName' }
+          ]
+        }
+      ]);
+
+    // 2. Get all loan IDs from these contracts
+    const loanIds = contracts.map(contract => contract.loanID).filter(Boolean);
+
+    // 3. Find all loans with those IDs
+    const loans = await Loan.find({ _id: { $in: loanIds } })
       .sort({ startDate: -1 }); // Newest loans first
 
-    res.json(loans);
+    // 4. Fetch all payments for these loans
+    const payments = await Payment.find({ loanID: { $in: loanIds } });
+
+    // 5. Group payments by loanID
+    const paymentsByLoan = payments.reduce((acc, payment) => {
+      const key = payment.loanID.toString();
+      if (!acc[key]) acc[key] = [];
+      acc[key].push(payment);
+      return acc;
+    }, {});
+
+    // 6. Join contract data and payments to each loan
+    const loansWithContracts = loans.map(loan => {
+      const contract = contracts.find(c => c.loanID && c.loanID.equals(loan._id));
+      return {
+        ...loan.toObject(),
+        contract: contract ? contract.toObject() : null,
+        payments: paymentsByLoan[loan._id.toString()] || []
+      };
+    });
+
+    res.json(loansWithContracts);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -85,34 +110,35 @@ exports.getUserLoans = async (req, res) => {
 exports.getLoanById = async (req, res) => {
   try {
     const loanId = req.params.id;
-    
+
+    // Find the loan by ID
     const loan = await Loan.findById(loanId)
-      .populate({
-        path: 'contractID',
-        populate: [
-          { path: 'sponsorID_1', select: 'firstName lastName' },
-          { path: 'sponsorID_2', select: 'firstName lastName' },
-          { 
-            path: 'typeTermID',
-            populate: [
-              { path: 'loanTypeID', select: 'loanName minAmount maxAmount' },
-              { path: 'loanTermID', select: 'termName minTerm maxTerm' }
-            ]
-          }
-        ]
-      })
-      .populate({
-        path: 'payments',
-        options: { sort: { dueDate: 1 } } // Sort payments by due date
-      })
       .populate('userID', 'firstName lastName email'); // Include borrower info
 
     if (!loan) {
       return res.status(404).json({ error: 'Loan not found' });
     }
 
+    // Fetch payments for this loan
+    const payments = await Payment.find({ loanID: loan._id }).sort({ dueDate: 1 });
+
+    // Find the contract that references this loan
+    const { Contract } = require('../models/contract');
+    const contract = await Contract.findOne({ loanID: loan._id })
+      .populate([
+        { path: 'sponsorID_1', select: 'firstName lastName' },
+        { path: 'sponsorID_2', select: 'firstName lastName' },
+        {
+          path: 'typeTermID',
+          populate: [
+            { path: 'loanTypeID', select: 'loanName minAmount maxAmount' },
+            { path: 'loanTermID', select: 'termName minTerm maxTerm' }
+          ]
+        }
+      ]);
+
     // Ensure loan status is 'completed' if all payments are paid
-    const allPaid = loan.payments.length > 0 && loan.payments.every(payment => payment.status === 'paid');
+    const allPaid = payments.length > 0 && payments.every(payment => payment.status === 'paid');
     if (allPaid && loan.status !== 'completed') {
       loan.status = 'completed';
       await loan.save();
@@ -120,16 +146,18 @@ exports.getLoanById = async (req, res) => {
 
     // Calculate loan summary
     const totalAmount = loan.loanAmount;
-    const paidAmount = loan.payments.reduce((sum, payment) => 
+    const paidAmount = payments.reduce((sum, payment) => 
       payment.status === 'paid' ? sum + payment.amount : sum, 0);
     const remainingAmount = totalAmount - paidAmount;
     
-    // Add calculated fields to response
+    // Add calculated fields and contract to response
     const loanWithSummary = {
       ...loan.toObject(),
       totalAmount,
       paidAmount,
-      remainingAmount
+      remainingAmount,
+      contract: contract ? contract.toObject() : null,
+      payments
     };
 
     res.json(loanWithSummary);
