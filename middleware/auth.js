@@ -69,12 +69,12 @@ const authorizeLoanAccess = async (req, res, next) => {
       return res.status(404).json({ error: 'Loan not found' });
     }
 
-    const contract = await Contract.findById(loan.contractID);
+    const contract = await Contract.findOne({ loanID: loan._id });
     if (!contract) {
       return res.status(404).json({ error: 'Contract not found' });
     }
 
-    const isBorrower = loan.userID.equals(req.user._id);
+    const isBorrower = contract.userID && contract.userID.equals(req.user._id);
     const isSponsor1 = contract.sponsorID_1 && contract.sponsorID_1.equals(req.user._id);
     const isSponsor2 = contract.sponsorID_2 && contract.sponsorID_2.equals(req.user._id);
 

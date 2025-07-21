@@ -25,6 +25,10 @@ const createLoan = async (contract) => {
     });
     
     await loan.save();
+
+    // Link the contract to the loan by setting loanID
+    const { Contract } = require('../models/contract');
+    await Contract.findByIdAndUpdate(contract._id, { loanID: loan._id });
     
     // Defensive check before creating payment schedule
     console.log('Creating payment schedule:', {
@@ -63,6 +67,7 @@ exports.getUserLoans = async (req, res) => {
       .populate([
         { path: 'sponsorID_1', select: 'firstName lastName' },
         { path: 'sponsorID_2', select: 'firstName lastName' },
+        { path: 'userID', select: 'firstName lastName email' },
         {
           path: 'typeTermID',
           populate: [
@@ -90,13 +95,27 @@ exports.getUserLoans = async (req, res) => {
       return acc;
     }, {});
 
-    // 6. Join contract data and payments to each loan
+    // 6. Join contract data and payments to each loan, and add summary fields
     const loansWithContracts = loans.map(loan => {
       const contract = contracts.find(c => c.loanID && c.loanID.equals(loan._id));
+      const payments = paymentsByLoan[loan._id.toString()] || [];
+      const totalAmount = loan.loanAmount;
+      const paidAmount = payments.reduce((sum, payment) => payment.status === 'paid' ? sum + payment.amount : sum, 0);
+      const remainingAmount = totalAmount - paidAmount;
+      const loanObj = loan.toObject();
+      // Replace typeTermID with the name if available
+      if (contract && contract.typeTermID && contract.typeTermID.name) {
+        loanObj.typeTermID = contract.typeTermID.name;
+      } else {
+        delete loanObj.typeTermID;
+      }
       return {
-        ...loan.toObject(),
+        ...loanObj,
         contract: contract ? contract.toObject() : null,
-        payments: paymentsByLoan[loan._id.toString()] || []
+        payments,
+        totalAmount,
+        paidAmount,
+        remainingAmount
       };
     });
 
@@ -112,8 +131,7 @@ exports.getLoanById = async (req, res) => {
     const loanId = req.params.id;
 
     // Find the loan by ID
-    const loan = await Loan.findById(loanId)
-      .populate('userID', 'firstName lastName email'); // Include borrower info
+    const loan = await Loan.findById(loanId);
 
     if (!loan) {
       return res.status(404).json({ error: 'Loan not found' });
@@ -128,6 +146,7 @@ exports.getLoanById = async (req, res) => {
       .populate([
         { path: 'sponsorID_1', select: 'firstName lastName' },
         { path: 'sponsorID_2', select: 'firstName lastName' },
+        { path: 'userID', select: 'firstName lastName email' },
         {
           path: 'typeTermID',
           populate: [
@@ -136,6 +155,7 @@ exports.getLoanById = async (req, res) => {
           ]
         }
       ]);
+    // Do not return error if contract is not found; just continue
 
     // Ensure loan status is 'completed' if all payments are paid
     const allPaid = payments.length > 0 && payments.every(payment => payment.status === 'paid');
@@ -159,6 +179,13 @@ exports.getLoanById = async (req, res) => {
       contract: contract ? contract.toObject() : null,
       payments
     };
+
+    // Replace typeTermID with the name if available
+    if (contract && contract.typeTermID && contract.typeTermID.name) {
+      loanWithSummary.typeTermID = contract.typeTermID.name;
+    } else {
+      delete loanWithSummary.typeTermID;
+    }
 
     res.json(loanWithSummary);
   } catch (error) {
