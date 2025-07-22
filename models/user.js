@@ -168,7 +168,7 @@ function validateRegisterUser(obj) {
     address: Joi.string().optional(),
     DateOfBirth: Joi.date().required(),
     gender: Joi.string().valid('female', 'male').optional(),
-    employmentStatus: Joi.string().valid('student', 'employee', 'unemployed', 'employed', 'self-employed').optional(),
+    employmentStatus: Joi.string().valid('Employed', 'Self-Employed', 'Unemployed', 'Student','Other').optional(),
     income: Joi.number().required(),
     creditID: Joi.string().optional(),
   });
@@ -194,7 +194,7 @@ function ValidateUpdateUser(obj) {
     address: Joi.string().trim().min(4).max(100),
     creditID: Joi.string().allow(null, '').optional(),
     gender: Joi.string().valid('female', 'male').optional(),
-    employmentStatus:Joi.string().valid('student','employee','unemploeed').optional(),
+    employmentStatus:Joi.string().valid('Employed', 'Self-Employed', 'Unemployed', 'Student','Other').optional(),
     income: Joi.number(),
   });
   return schema.validate(obj);

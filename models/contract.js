@@ -9,7 +9,7 @@ const contractSchema = new mongoose.Schema({
     },
     employmentStatus: {
       type: String,
-      enum: ['employed', 'self-employed', 'unemployed', 'student'],
+      enum: ['Employed', 'Self-Employed', 'Unemployed', 'Student','Other'],
     },
     dateOfCreate: {
        type: Date, 

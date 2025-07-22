@@ -251,15 +251,15 @@ exports.getActiveLoanForUser = async (req, res) => {
 
     // Remove _id and __v from loan
     const { _id, __v, ...loanWithoutIds } = loan.toObject();
-    // Remove _id and __v from each payment
-    const paymentsClean = payments.map(({ _id, __v, ...rest }) => rest);
+  
+  
 
     res.json({
       loan: loanWithoutIds,
       totalAmount,
       paidAmount,
       remainingAmount,
-      paymentSchedule: paymentsClean
+      payments
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
