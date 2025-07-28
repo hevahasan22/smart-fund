@@ -237,102 +237,22 @@ exports.createContract = async (req, res) => {
 
     // Set status based on document requirements
     if (requiredDocTypes.length > 0) {
-      contract.status = 'pending_document_approval';
+      contract.status = 'pending_document_upload';
+      await contract.save();
+      return res.status(201).json({
+        message: 'Contract created. Please upload required documents.',
+        contractId: contract._id,
+        contract: contractToUserView(contract),
+        requiredDocuments: requiredDocTypes.map(dt => ({
+          id: dt._id,
+          name: dt.documentName,
+          description: dt.description || 'Required document'
+        })),
+        nextStep: 'Upload all required documents using the provided contract ID.'
+      });
     } else {
       contract.status = 'pending_sponsor_approval';
-    }
-
-    await contract.save();
-
-    // 10. Handle document uploads (required)
-    const uploadedDocuments = [];
-    
-    if (requiredDocTypes.length > 0) {
-      console.log(`Processing ${files ? files.length : 0} uploaded files`);
-      
-      // Check if files were provided
-      if (!files || files.length === 0) {
-        return res.status(400).json({ 
-          error: 'Documents are required for this loan type',
-          message: 'Please upload all required documents to complete your application',
-          requiredDocuments: requiredDocTypes.map(dt => ({
-            id: dt._id,
-            name: dt.documentName,
-            description: dt.description || 'Required document'
-          })),
-          instructions: {
-            howToUpload: 'Send files using multipart/form-data with field names like "doc_[documentTypeId]"',
-            example: `For document type ${requiredDocTypes[0].documentName}, use field name "doc_${requiredDocTypes[0]._id}"`
-          }
-        });
-      }
-      
-      for (const docType of requiredDocTypes) {
-        const file = files.find(f => f.fieldname === `doc_${docType._id}`);
-        if (!file) {
-          return res.status(400).json({ 
-            error: `Missing required document: ${docType.documentName}`,
-            message: 'All required documents must be uploaded to complete your application',
-            missingDocument: {
-              id: docType._id,
-              name: docType.documentName,
-              description: docType.description || 'Required document'
-            },
-            requiredDocuments: requiredDocTypes.map(dt => ({
-              id: dt._id,
-              name: dt.documentName,
-              description: dt.description || 'Required document',
-              provided: files.some(f => f.fieldname === `doc_${dt._id}`)
-            })),
-            instructions: {
-              fieldName: `doc_${docType._id}`,
-              howToUpload: 'Send files using multipart/form-data with the correct field names'
-            }
-          });
-        }
-
-        try {
-          // Upload to Cloudinary
-          const result = await new Promise((resolve, reject) => {
-            cloudinary.uploader.upload_stream(
-              { resource_type: 'auto', folder: 'documents' },
-              (error, result) => {
-                if (error) reject(error);
-                else resolve(result);
-              }
-            ).end(file.buffer);
-          });
-
-          // Create document record with pending status for admin review
-          const document = new additionalDocumentModel({
-            typeID: docType._id,
-            contractID: contract._id,
-            documentFile: {
-              url: result.secure_url,
-              public_id: result.public_id
-            },
-            uploadedBy: userId,
-            status: 'pending'
-          });
-
-          await document.save();
-          uploadedDocuments.push(document);
-          console.log(`Document ${docType.documentName} uploaded successfully and pending admin review`);
-          
-          // Notify admin about new document pending review
-          await notificationService.sendDocumentPendingReview(document._id);
-        } catch (uploadError) {
-          console.error(`Error uploading document ${docType.documentName}:`, uploadError);
-          return res.status(500).json({ 
-            error: `Failed to upload document: ${docType.documentName}`,
-            message: 'There was an error uploading your document. Please try again.',
-            documentName: docType.documentName,
-            uploadError: uploadError.message
-          });
-        }
-      }
-    } else {
-      console.log('No documents required for this loan type');
+      await contract.save();
     }
 
     // 11. Notify sponsors using notification service
@@ -343,53 +263,38 @@ exports.createContract = async (req, res) => {
       term: `${loanTermMonths} months`
     };
 
-    // 10. Set contract status based on document requirements
-    if (requiredDocTypes.length > 0) {
-      // If documents are required, contract waits for admin approval of documents
-      contract.status = 'pending_document_approval';
-      await contract.save();
-      
-      res.status(201).json({
-        message: 'Contract created successfully. Documents uploaded and pending admin review.',
-        contract: contractToUserView(contract),
-        documents: uploadedDocuments.map(doc => doc._id),
-        nextStep: 'Admin will review your documents before sponsor approval process begins'
-      });
-    } else {
-      // If no documents required, start sponsor approval process immediately
-      // Add contract to sponsors' pending approvals and send notifications
-      await Promise.all([
-        // Add to sponsor1's pending approvals
-        User.findByIdAndUpdate(sponsor1._id, {
-          $push: {
-            pendingApprovals: {
-              contractId: contract._id,
-              borrowerId: userId,
-              requestedAt: new Date()
-            }
+    // If no documents required, start sponsor approval process immediately
+    await Promise.all([
+      // Add to sponsor1's pending approvals
+      User.findByIdAndUpdate(sponsor1._id, {
+        $push: {
+          pendingApprovals: {
+            contractId: contract._id,
+            borrowerId: userId,
+            requestedAt: new Date()
           }
-        }),
-        // Add to sponsor2's pending approvals
-        User.findByIdAndUpdate(sponsor2._id, {
-          $push: {
-            pendingApprovals: {
-              contractId: contract._id,
-              borrowerId: userId,
-              requestedAt: new Date()
-            }
+        }
+      }),
+      // Add to sponsor2's pending approvals
+      User.findByIdAndUpdate(sponsor2._id, {
+        $push: {
+          pendingApprovals: {
+            contractId: contract._id,
+            borrowerId: userId,
+            requestedAt: new Date()
           }
-        }),
-        // Send dual notifications (in-app + email) to both sponsors
-        notificationService.sendSponsorRequest(sponsor1, borrower, loanDetails),
-        notificationService.sendSponsorRequest(sponsor2, borrower, loanDetails)
-      ]);
-      await processContractApproval(contract);
-      res.status(201).json({
-        message: 'Contract created successfully. Waiting for sponsor approvals.',
-        contract: contractToUserView(contract),
-        documents: uploadedDocuments.map(doc => doc._id)
-      });
-    }
+        }
+      }),
+      // Send dual notifications (in-app + email) to both sponsors
+      notificationService.sendSponsorRequest(sponsor1, borrower, loanDetails),
+      notificationService.sendSponsorRequest(sponsor2, borrower, loanDetails)
+    ]);
+    await processContractApproval(contract);
+    res.status(201).json({
+      message: 'Contract created successfully. Waiting for sponsor approvals.',
+      contract: contractToUserView(contract),
+      documents: []
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

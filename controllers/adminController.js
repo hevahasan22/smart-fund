@@ -604,21 +604,27 @@ const checkContractDocumentCompletion = async (contractId) => {
     
     if (allApproved) {
       console.log(`All documents approved for contract ${contractId}, triggering sponsor approval requests`);
-      
       // Update contract status to pending_sponsor_approval if it was waiting for documents
-      if (contract.status === 'pending_document_approval') {
+      if (contract.status === 'pending_document_upload' || contract.status === 'pending_document_approval') {
         contract.status = 'pending_sponsor_approval';
         await contract.save();
-        
         // Notify user that all documents are approved and contract is proceeding
         await notificationService.sendContractDocumentCompletionNotification(contract.userID, contract._id);
-        
         // Add contract to sponsors' pending approvals and send notifications
         const User = require('../models/user').User;
         const borrower = await User.findById(contract.userID);
         const sponsor1 = await User.findById(contract.sponsorID_1);
         const sponsor2 = await User.findById(contract.sponsorID_2);
-        const loanTypeRecord = contract.typeTermID.loanTypeID ? contract.typeTermID.loanTypeID : undefined;
+        // Populate loanTypeID if not populated
+        let loanTypeRecord;
+        if (contract.typeTermID && contract.typeTermID.loanTypeID) {
+          loanTypeRecord = contract.typeTermID.loanTypeID;
+        } else {
+          // Fetch typeTerm and populate loanTypeID
+          const typetermModel = require('../models/typeterm').typetermModel;
+          const typeTerm = await typetermModel.findById(contract.typeTermID).populate('loanTypeID');
+          loanTypeRecord = typeTerm ? typeTerm.loanTypeID : undefined;
+        }
         const loanDetails = {
           type: loanTypeRecord ? loanTypeRecord.loanName : '',
           amount: contract.tempLoanAmount,
@@ -648,6 +654,11 @@ const checkContractDocumentCompletion = async (contractId) => {
         ]);
       }
     } else {
+      // If not all approved, but all required docs are uploaded, set status to pending_document_approval
+      if (contract.status === 'pending_document_upload') {
+        contract.status = 'pending_document_approval';
+        await contract.save();
+      }
       console.log(`Not all documents approved for contract ${contractId}`);
     }
   } catch (error) {

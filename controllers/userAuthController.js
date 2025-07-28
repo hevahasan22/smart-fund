@@ -245,11 +245,14 @@ exports.getUser = async (req, res) => {
     res.json({
       success: true,
       user: {
-        id: user._id,
         email: user.email,
         fullName: `${user.userFirstName} ${user.userLastName}`,
-        employmentStatus: user.employmentStatus,
-        role: user.role,
+        gender: user.gender,
+        income: user.income,
+        creditID: user.creditID,
+        address: user.address,
+        DateOfBirth: user.DateOfBirth,
+        phoneNumber: user.phoneNumber
       },
     });
   } catch (error) {

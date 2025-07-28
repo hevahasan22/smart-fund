@@ -46,7 +46,7 @@ exports.uploadDocument = async (req, res) => {
     }
     
     // Check if contract is in a state where documents can be uploaded
-    if (!['pending_sponsor_approval', 'pending_processing', 'pending_document_approval','pending'].includes(contract.status)) {
+    if (!['pending_sponsor_approval', 'pending_processing', 'pending_document_approval','pending','pending_document_upload'].includes(contract.status)) {
       return res.status(400).json({ 
         error: 'Documents cannot be uploaded at this stage',
         currentStatus: contract.status
@@ -106,6 +106,26 @@ exports.uploadDocument = async (req, res) => {
     });
     
     await document.save();
+
+    // After saving, check if all required documents are uploaded
+    const requiredDocTypes = await documentTypeTermRelationModel.find({
+      typeTermID: contract.typeTermID,
+      isRequired: true
+    }).populate('documentTypeID');
+
+    const uploadedDocs = await additionalDocumentModel.find({
+      contractID,
+      status: { $in: ['pending', 'approved'] }
+    });
+
+    const allUploaded = requiredDocTypes.every(docType =>
+      uploadedDocs.some(doc => doc.typeID.equals(docType.documentTypeID._id))
+    );
+
+    if (allUploaded && contract.status === 'pending_document_upload') {
+      contract.status = 'pending_document_approval';
+      await contract.save();
+    }
     
     console.log(`Document uploaded successfully: ${document._id}`);
     

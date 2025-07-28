@@ -147,8 +147,8 @@ exports.sendSponsorRequest = async (sponsor, borrower, loanDetails) => {
 // Send sponsor approval notification
 exports.sendSponsorApprovalNotification = async (sponsorId, contractId, isFirstApproval = false) => {
   const message = isFirstApproval 
-    ? `You have approved the contract request for contract #${contractId}`
-    : `Your co-sponsor has approved contract #${contractId}. Waiting for your approval.`;
+    ? 'You have approved the contract request.'
+    : 'Your co-sponsor has approved the contract. Waiting for your approval.';
   
   const emailSubject = isFirstApproval ? 'Contract Approval Confirmation' : 'Co-Sponsor Approval Notification';
   const emailHtml = `
@@ -165,7 +165,7 @@ exports.sendSponsorApprovalNotification = async (sponsorId, contractId, isFirstA
 exports.sendContractRejectionNotification = async (userId, contractId, reason, isSponsor = false) => {
   const message = isSponsor 
     ? `You have rejected the contract request for contract #${contractId}`
-    : `Your contract #${contractId} has been rejected by a sponsor: ${reason}`;
+    : `Your contract has been rejected by a sponsor: ${reason}`;
   
   const emailSubject = 'Contract Rejection Notification';
   const emailHtml = `
@@ -180,11 +180,11 @@ exports.sendContractRejectionNotification = async (userId, contractId, reason, i
 
 // Send contract approval notification
 exports.sendContractApprovalNotification = async (userId, contractId) => {
-  const message = `Your contract #${contractId} has been approved!`;
+  const message = 'Your contract has been approved!';
   const emailSubject = 'Contract Approved!';
   const emailHtml = `
     <p>Congratulations!</p>
-    <p>Your contract #${contractId} has been approved and is now active.</p>
+    <p>Your contract has been approved and is now active.</p>
     <p>Please log in to the platform to view your loan details and payment schedule.</p>
     <p>Best regards,<br>Smart Fund Team</p>
   `;
@@ -194,7 +194,7 @@ exports.sendContractApprovalNotification = async (userId, contractId) => {
 
 // Send contract processing notification
 exports.sendContractProcessingNotification = async (userId, contractId) => {
-  const message = `Both sponsors have approved your contract #${contractId}. It is now being processed.`;
+  const message = 'Both sponsors have approved your contract. It is now being processed.';
   const emailSubject = 'Contract Processing';
   const emailHtml = `
     <p>Hello,</p>
@@ -208,7 +208,7 @@ exports.sendContractProcessingNotification = async (userId, contractId) => {
 
 // Send partial approval notification
 exports.sendPartialApprovalNotification = async (userId, contractId) => {
-  const message = `One sponsor has approved your contract #${contractId}. Waiting for the second sponsor's approval.`;
+  const message = "One sponsor has approved your contract. Waiting for the second sponsor's approval.";
   const emailSubject = 'Partial Contract Approval';
   const emailHtml = `
     <p>Hello,</p>
@@ -307,7 +307,7 @@ exports.sendDocumentRejectionNotification = async (userId, documentId, documentN
 
 // Send contract document completion notification
 exports.sendContractDocumentCompletionNotification = async (userId, contractId) => {
-  const message = `All documents for your contract #${contractId} have been approved. Contract is now being processed.`;
+  const message = 'All documents for your contract have been approved. Contract is now being processed.';
   const emailSubject = 'Documents Approved - Contract Processing';
   const emailHtml = `
     <p>Hello,</p>
