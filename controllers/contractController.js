@@ -870,17 +870,38 @@ exports.getUserNotifications = async (req, res) => {
     
     let notifications = user.notifications || [];
     notifications = notifications.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-    
-    if (unreadOnly === 'true') {
-      notifications = notifications.filter(n => !n.isRead);
-    }
-    
+
+    // Always filter to only unread notifications
+    notifications = notifications.filter(n => !n.isRead);
+
     notifications = notifications.slice(0, parseInt(limit));
-    
-    console.log(`Found ${notifications.length} notifications for user ${userId}`);
-    
+
+    // Enhance notifications: replace contract/payment IDs with amount and type if possible
+    const enhancedNotifications = await Promise.all(notifications.map(async (n) => {
+      let enhanced = { ...n._doc, ...n };
+      // If notification has contractId, fetch contract and loan type/amount
+      if (n.contractId) {
+        const contract = await require('../models/contract').Contract.findById(n.contractId)
+          .populate({ path: 'typeTermID', populate: { path: 'loanTypeID', select: 'loanName' } });
+        if (contract) {
+          enhanced.loanType = contract.typeTermID?.loanTypeID?.loanName || undefined;
+          enhanced.amount = contract.tempLoanAmount || undefined;
+        }
+      }
+      // If notification has amount and loanType already, keep them
+      if (n.amount && n.loanType) {
+        enhanced.amount = n.amount;
+        enhanced.loanType = n.loanType;
+      }
+      // Remove IDs from message if present
+      if (enhanced.message) {
+        enhanced.message = enhanced.message.replace(/(contract|loan|payment)\s?#?([a-f0-9]{24,})/gi, '').trim();
+      }
+      return enhanced;
+    }));
+
     res.json({
-      notifications,
+      notifications: enhancedNotifications,
       totalCount: user.notifications ? user.notifications.length : 0,
       unreadCount: user.notifications ? user.notifications.filter(n => !n.isRead).length : 0
     });

@@ -196,6 +196,7 @@ function ValidateUpdateUser(obj) {
     gender: Joi.string().valid('female', 'male').optional(),
     employmentStatus:Joi.string().valid('Employed', 'Self-Employed', 'Unemployed', 'Student','Other').optional(),
     income: Joi.number(),
+    profilePhoto: Joi.string().optional(),
   });
   return schema.validate(obj);
 }
@@ -229,4 +230,5 @@ module.exports = {
   validateLoginUser,
   validateVerifyUser,
   validateResendOtp, // Added
+  ValidateUpdateUser, // Exported for update user validation
 };

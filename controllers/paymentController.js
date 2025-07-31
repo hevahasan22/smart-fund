@@ -178,7 +178,7 @@ const notifyPayment = async (payment, loan, payerId) => {
     ].filter(user => user); // Remove nulls
 
     const payerName = payer.firstName + ' ' + payer.lastName;
-    const message = `Payment of $${payment.amount.toFixed(2)} for loan ${loan._id} was made by ${payerName}`;
+    const message = `Payment of $${Math.round(payment.amount)} for loan ${loan._id} was made by ${payerName}`;
 
     await Promise.all(parties.map(user => 
       User.findByIdAndUpdate(user._id, {
@@ -220,8 +220,8 @@ exports.getPaymentsByLoanId = async (req, res) => {
       return res.status(403).json({ error: 'Unauthorized to view these payments' });
     }
 
-    const payments = await Payment.find({ loanID: loanId }).sort({ dueDate: 1 });
-    res.json(payments);
+   
+    
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

@@ -1,7 +1,8 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
-const { User, validateRegisterUser, validateLoginUser } = require('../models/user');
+const { User, validateRegisterUser, validateLoginUser, ValidateUpdateUser } = require('../models/user');
+const path = require('path');
 
 // Nodemailer setup (using Gmail)
 const transporter = nodemailer.createTransport({
@@ -257,6 +258,51 @@ exports.getUser = async (req, res) => {
     });
   } catch (error) {
     console.error('Error in getUser:', error.message);
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+};
+
+// Update user information (including profile photo)
+exports.updateUser = async (req, res) => {
+  const userId = req.params.userId;
+  // Validate input (excluding file)
+  const { error } = ValidateUpdateUser(req.body);
+  if (error) {
+    return res.status(400).json({ success: false, message: error.details[0].message });
+  }
+  try {
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    // Update allowed fields
+    const allowedFields = [
+      'userFirstName', 'userLastName', 'email', 'password', 'phoneNumber', 'DateOfBirth',
+      'address', 'creditID', 'gender', 'employmentStatus', 'income', 'profilePhoto'
+    ];
+    allowedFields.forEach(field => {
+      if (req.body[field] !== undefined) {
+        user[field] = req.body[field];
+      }
+    });
+    // Handle profile photo upload
+    if (req.file) {
+      // Save file to disk (e.g., /uploads/profilePhotos/)
+      const uploadDir = path.join(__dirname, '../uploads/profilePhotos');
+      const fs = require('fs');
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+      const ext = path.extname(req.file.originalname);
+      const fileName = `${userId}_${Date.now()}${ext}`;
+      const filePath = path.join(uploadDir, fileName);
+      fs.writeFileSync(filePath, req.file.buffer);
+      user.profilePhoto = `/uploads/profilePhotos/${fileName}`;
+    }
+    await user.save();
+    res.json({ success: true, message: 'User updated successfully', user });
+  } catch (error) {
+    console.error('Error in updateUser:', error.message);
     res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
 };

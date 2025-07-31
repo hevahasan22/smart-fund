@@ -1,6 +1,7 @@
 const nodemailer = require('nodemailer');
 const { User } = require('../models/user');
 require('dotenv').config()
+const mongoose = require('mongoose');
 
 // Email configuration with error handling
 let transporter;
@@ -32,6 +33,7 @@ exports.createNotification = async (userId, type, message, contractId = null) =>
     await User.findByIdAndUpdate(userId, {
       $push: {
         notifications: {
+          _id: new mongoose.Types.ObjectId(), // Ensure each notification has an _id
           type,
           message,
           contractId,
@@ -144,12 +146,24 @@ exports.sendSponsorRequest = async (sponsor, borrower, loanDetails) => {
   await this.sendDualNotification(sponsor._id, 'sponsor_request', message, null, emailSubject, emailHtml);
 };
 
+// Helper to get contract details for notifications
+async function getContractDetails(contractId) {
+  const { Contract } = require('../models/contract');
+  const contract = await Contract.findById(contractId)
+    .populate({ path: 'typeTermID', populate: { path: 'loanTypeID', select: 'loanName' } });
+  return contract ? {
+    loanType: contract.typeTermID?.loanTypeID?.loanName,
+    amount: contract.tempLoanAmount
+  } : {};
+}
+
 // Send sponsor approval notification
 exports.sendSponsorApprovalNotification = async (sponsorId, contractId, isFirstApproval = false) => {
+  const details = await getContractDetails(contractId);
   const message = isFirstApproval 
-    ? 'You have approved the contract request.'
-    : 'Your co-sponsor has approved the contract. Waiting for your approval.';
-  
+    ? `You have approved the contract request for a ${details.loanType || ''} loan of $${details.amount || ''}.`
+    : `Your co-sponsor has approved the contract for a ${details.loanType || ''} loan of $${details.amount || ''}. Waiting for your approval.`;
+
   const emailSubject = isFirstApproval ? 'Contract Approval Confirmation' : 'Co-Sponsor Approval Notification';
   const emailHtml = `
     <p>Hello,</p>
@@ -157,16 +171,17 @@ exports.sendSponsorApprovalNotification = async (sponsorId, contractId, isFirstA
     <p>Please log in to the platform to view the contract details.</p>
     <p>Best regards,<br>Smart Fund Team</p>
   `;
-  
+
   await this.sendDualNotification(sponsorId, 'sponsor_approved', message, contractId, emailSubject, emailHtml);
 };
 
 // Send contract rejection notification
 exports.sendContractRejectionNotification = async (userId, contractId, reason, isSponsor = false) => {
+  const details = await getContractDetails(contractId);
   const message = isSponsor 
-    ? `You have rejected the contract request for contract #${contractId}`
-    : `Your contract has been rejected by a sponsor: ${reason}`;
-  
+    ? `You have rejected the contract request for a ${details.loanType || ''} loan of $${details.amount || ''}.`
+    : `Your contract for a ${details.loanType || ''} loan of $${details.amount || ''} has been rejected by a sponsor: ${reason}`;
+
   const emailSubject = 'Contract Rejection Notification';
   const emailHtml = `
     <p>Hello,</p>
@@ -174,27 +189,29 @@ exports.sendContractRejectionNotification = async (userId, contractId, reason, i
     <p>Please log in to the platform for more details.</p>
     <p>Best regards,<br>Smart Fund Team</p>
   `;
-  
+
   await this.sendDualNotification(userId, 'contract_rejected', message, contractId, emailSubject, emailHtml);
 };
 
 // Send contract approval notification
 exports.sendContractApprovalNotification = async (userId, contractId) => {
-  const message = 'Your contract has been approved!';
+  const details = await getContractDetails(contractId);
+  const message = `Your contract for a ${details.loanType || ''} loan of $${details.amount || ''} has been approved!`;
   const emailSubject = 'Contract Approved!';
   const emailHtml = `
     <p>Congratulations!</p>
-    <p>Your contract has been approved and is now active.</p>
+    <p>${message}</p>
     <p>Please log in to the platform to view your loan details and payment schedule.</p>
     <p>Best regards,<br>Smart Fund Team</p>
   `;
-  
+
   await this.sendDualNotification(userId, 'contract_approved', message, contractId, emailSubject, emailHtml);
 };
 
 // Send contract processing notification
 exports.sendContractProcessingNotification = async (userId, contractId) => {
-  const message = 'Both sponsors have approved your contract. It is now being processed.';
+  const details = await getContractDetails(contractId);
+  const message = `Both sponsors have approved your contract for a ${details.loanType || ''} loan of $${details.amount || ''}. It is now being processed.`;
   const emailSubject = 'Contract Processing';
   const emailHtml = `
     <p>Hello,</p>
@@ -202,13 +219,14 @@ exports.sendContractProcessingNotification = async (userId, contractId) => {
     <p>You will receive another notification once the processing is complete.</p>
     <p>Best regards,<br>Smart Fund Team</p>
   `;
-  
+
   await this.sendDualNotification(userId, 'contract_processing', message, contractId, emailSubject, emailHtml);
 };
 
 // Send partial approval notification
 exports.sendPartialApprovalNotification = async (userId, contractId) => {
-  const message = "One sponsor has approved your contract. Waiting for the second sponsor's approval.";
+  const details = await getContractDetails(contractId);
+  const message = `One sponsor has approved your contract for a ${details.loanType || ''} loan of $${details.amount || ''}. Waiting for the second sponsor's approval.`;
   const emailSubject = 'Partial Contract Approval';
   const emailHtml = `
     <p>Hello,</p>
@@ -216,13 +234,13 @@ exports.sendPartialApprovalNotification = async (userId, contractId) => {
     <p>You will be notified once both sponsors have made their decision.</p>
     <p>Best regards,<br>Smart Fund Team</p>
   `;
-  
+
   await this.sendDualNotification(userId, 'partial_approval', message, contractId, emailSubject, emailHtml);
 };
 
 // Send payment reminder
 exports.sendPaymentReminder = async (payment, user) => {
-  const message = `Your payment of $${payment.amount} is due on ${payment.dueDate.toDateString()}`;
+  const message = `Your payment of $${Math.round(payment.amount)} is due on ${payment.dueDate.toDateString()}`;
   const emailSubject = 'Payment Due Reminder';
   const emailHtml = `
     <p>Hello ${user.userFirstName},</p>
@@ -307,6 +325,7 @@ exports.sendDocumentRejectionNotification = async (userId, documentId, documentN
 
 // Send contract document completion notification
 exports.sendContractDocumentCompletionNotification = async (userId, contractId) => {
+  const details = await getContractDetails(contractId);
   const message = 'All documents for your contract have been approved. Contract is now being processed.';
   const emailSubject = 'Documents Approved - Contract Processing';
   const emailHtml = `

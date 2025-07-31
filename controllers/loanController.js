@@ -100,8 +100,8 @@ exports.getUserLoans = async (req, res) => {
       const contract = contracts.find(c => c.loanID && c.loanID.equals(loan._id));
       const payments = paymentsByLoan[loan._id.toString()] || [];
       const totalAmount = loan.loanAmount;
-      const paidAmount = payments.reduce((sum, payment) => payment.status === 'paid' ? sum + payment.amount : sum, 0);
-      const remainingAmount = totalAmount - paidAmount;
+      const paidAmount = Math.round(payments.reduce((sum, payment) => payment.status === 'paid' ? sum + payment.amount : sum, 0));
+      const remainingAmount = Math.round(totalAmount - paidAmount);
       const loanObj = loan.toObject();
       // Replace typeTermID with the name if available
       if (contract && contract.typeTermID && contract.typeTermID.name) {
@@ -166,9 +166,9 @@ exports.getLoanById = async (req, res) => {
 
     // Calculate loan summary
     const totalAmount = loan.loanAmount;
-    const paidAmount = payments.reduce((sum, payment) => 
-      payment.status === 'paid' ? sum + payment.amount : sum, 0);
-    const remainingAmount = totalAmount - paidAmount;
+    const paidAmount = Math.round(payments.reduce((sum, payment) => 
+      payment.status === 'paid' ? sum + payment.amount : sum, 0));
+    const remainingAmount = Math.round(totalAmount - paidAmount);
     
     // Add calculated fields and contract to response
     const loanWithSummary = {
@@ -220,9 +220,10 @@ const createPaymentSchedule = async (loan, termMonths) => {
 // Payment calculation
 const calculateMonthlyPayment = (principal, annualRate, termMonths) => {
   const monthlyRate = annualRate / 100 / 12;
-  return principal * 
+  const payment = principal * 
     (monthlyRate * Math.pow(1 + monthlyRate, termMonths)) / 
     (Math.pow(1 + monthlyRate, termMonths) - 1);
+  return Math.round(payment); // Round to nearest integer
 };
 
 // Get the active loan for the logged-in user
@@ -241,25 +242,50 @@ exports.getActiveLoanForUser = async (req, res) => {
     const loan = await Loan.findOne({ _id: { $in: loanIds }, status: 'active' });
     if (!loan) return res.json(null);
 
+    // Fetch the contract for this active loan, and populate sponsors
+    const contract = await Contract.findOne({ loanID: loan._id })
+      .populate([
+        { path: 'sponsorID_1', select: 'userFirstName userLastName email' },
+        { path: 'sponsorID_2', select: 'userFirstName userLastName email' }
+      ]);
+
     // Fetch payments for this loan
     const payments = await Payment.find({ loanID: loan._id }).sort({ dueDate: 1 });
 
     // Calculate summary
     const totalAmount = loan.loanAmount;
-    const paidAmount = payments.reduce((sum, payment) => payment.status === 'paid' ? sum + payment.amount : sum, 0);
-    const remainingAmount = totalAmount - paidAmount;
+    const paidAmount = Math.round(payments.reduce((sum, payment) => payment.status === 'paid' ? sum + payment.amount : sum, 0));
+    const remainingAmount = Math.round(totalAmount - paidAmount);
 
     // Remove _id and __v from loan
     const { _id, __v, ...loanWithoutIds } = loan.toObject();
-  
-  
+
+    // Prepare sponsor info
+    let sponsors = [];
+    if (contract) {
+      if (contract.sponsorID_1) {
+        sponsors.push({
+          id: contract.sponsorID_1._id,
+          name: `${contract.sponsorID_1.userFirstName} ${contract.sponsorID_1.userLastName}`,
+          email: contract.sponsorID_1.email
+        });
+      }
+      if (contract.sponsorID_2) {
+        sponsors.push({
+          id: contract.sponsorID_2._id,
+          name: `${contract.sponsorID_2.userFirstName} ${contract.sponsorID_2.userLastName}`,
+          email: contract.sponsorID_2.email
+        });
+      }
+    }
 
     res.json({
       loan: loanWithoutIds,
       totalAmount,
       paidAmount,
       remainingAmount,
-      payments
+      payments,
+      sponsors
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
