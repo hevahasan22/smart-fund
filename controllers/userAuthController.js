@@ -175,6 +175,7 @@ exports.login = async (req, res) => {
         email: user.email,
         fullName: `${user.userFirstName} ${user.userLastName}`,
         role: user.role,
+        profilePhoto: user.profilePhoto,
       },
     });
   } catch (error) {
@@ -228,6 +229,7 @@ exports.verifyEmail = async (req, res) => {
         email: user.email,
         fullName: `${user.userFirstName} ${user.userLastName}`,
         role: user.role,
+        profilePhoto: user.profilePhoto,
       },
     });
   } catch (error) {
@@ -239,10 +241,17 @@ exports.verifyEmail = async (req, res) => {
 // Get user by ID
 exports.getUser = async (req, res) => {
   try {
-    const user = await User.findOne({ _id: req.params.userId });
+    // Use the authenticated user's ID from the token
+    const userId = req.user._id;
+    
+    const user = await User.findOne({ _id: userId });
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
+    
+    console.log('User profile photo:', user.profilePhoto);
+    console.log('User ID:', userId);
+    
     res.json({
       success: true,
       user: {
@@ -253,7 +262,8 @@ exports.getUser = async (req, res) => {
         creditID: user.creditID,
         address: user.address,
         DateOfBirth: user.DateOfBirth,
-        phoneNumber: user.phoneNumber
+        phoneNumber: user.phoneNumber,
+        profilePhoto: user.profilePhoto
       },
     });
   } catch (error) {
@@ -264,7 +274,8 @@ exports.getUser = async (req, res) => {
 
 // Update user information (including profile photo)
 exports.updateUser = async (req, res) => {
-  const userId = req.params.userId;
+  // Use the authenticated user's ID from the token
+  const userId = req.user._id;
   // Validate input (excluding file)
   const { error } = ValidateUpdateUser(req.body);
   if (error) {
@@ -287,6 +298,7 @@ exports.updateUser = async (req, res) => {
     });
     // Handle profile photo upload
     if (req.file) {
+      console.log('Profile photo upload detected:', req.file.originalname);
       // Save file to disk (e.g., /uploads/profilePhotos/)
       const uploadDir = path.join(__dirname, '../uploads/profilePhotos');
       const fs = require('fs');
@@ -298,11 +310,91 @@ exports.updateUser = async (req, res) => {
       const filePath = path.join(uploadDir, fileName);
       fs.writeFileSync(filePath, req.file.buffer);
       user.profilePhoto = `/uploads/profilePhotos/${fileName}`;
+      console.log('Profile photo saved:', user.profilePhoto);
+    } else {
+      console.log('No profile photo file uploaded');
     }
     await user.save();
-    res.json({ success: true, message: 'User updated successfully', user });
+    res.json({ 
+      success: true, 
+      message: 'User updated successfully', 
+      user: {
+        id: user._id,
+        email: user.email,
+        fullName: `${user.userFirstName} ${user.userLastName}`,
+        gender: user.gender,
+        income: user.income,
+        creditID: user.creditID,
+        address: user.address,
+        DateOfBirth: user.DateOfBirth,
+        phoneNumber: user.phoneNumber,
+        profilePhoto: user.profilePhoto
+      }
+    });
   } catch (error) {
     console.error('Error in updateUser:', error.message);
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+};
+
+
+
+// Test endpoint to upload profile photo
+exports.testUpload = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const user = await User.findById(userId);
+    
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    
+    console.log('Test upload - User ID:', userId);
+    console.log('Test upload - File:', req.file);
+    
+    if (req.file) {
+      // Save file to disk
+      const uploadDir = path.join(__dirname, '../uploads/profilePhotos');
+      const fs = require('fs');
+      
+      // Create directory if it doesn't exist
+      if (!fs.existsSync(uploadDir)) {
+        fs.mkdirSync(uploadDir, { recursive: true });
+      }
+      
+      const ext = path.extname(req.file.originalname);
+      const fileName = `test_${userId}_${Date.now()}${ext}`;
+      const filePath = path.join(uploadDir, fileName);
+      
+      // Write file
+      fs.writeFileSync(filePath, req.file.buffer);
+      
+      // Update user profile photo
+      user.profilePhoto = `/uploads/profilePhotos/${fileName}`;
+      await user.save();
+      
+      console.log('Test upload - File saved:', user.profilePhoto);
+      
+      res.json({
+        success: true,
+        message: 'Test upload successful',
+        profilePhoto: user.profilePhoto,
+        fileInfo: {
+          originalName: req.file.originalname,
+          size: req.file.size,
+          mimetype: req.file.mimetype
+        }
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        message: 'No file uploaded',
+        body: req.body,
+        files: req.files
+      });
+    }
+  } catch (error) {
+    console.error('Error in testUpload:', error.message);
     res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
 };

@@ -2,6 +2,7 @@ require('dotenv').config();
 const express=require('express');
 const mongoose  = require('mongoose');
 const cors= require('cors');
+const path = require('path');
 const paymentController = require('./controllers/paymentController');
 const app=express();
 require('./models/index')
@@ -17,13 +18,23 @@ app.get('/health', (req, res) => {
 });
 
 //  Database Connection
-mongoose.connect(process.env.MONGO_URI)
-.then(()=>{
+const connectDB = async () => {
+  try {
+    await mongoose.connect(process.env.MONGO_URI, {
+      serverSelectionTimeoutMS: 5000, // Timeout after 5s instead of 30s
+      socketTimeoutMS: 45000, // Close sockets after 45s of inactivity
+      maxPoolSize: 10, // Maintain up to 10 socket connections
+      minPoolSize: 2, // Maintain at least 2 socket connections
+    });
     console.log('Connected to MongoDB');
-})
-.catch((err)=>{
-    console.log('Failed to connect to MongoDB:', err)
-})
+  } catch (err) {
+    console.log('Failed to connect to MongoDB:', err);
+    // Retry connection after 5 seconds
+    setTimeout(connectDB, 5000);
+  }
+};
+
+connectDB();
 
 // Handle MongoDB connection errors
 mongoose.connection.on('error', (err) => {
@@ -32,6 +43,14 @@ mongoose.connection.on('error', (err) => {
 
 mongoose.connection.on('disconnected', () => {
   console.log('MongoDB disconnected');
+});
+
+mongoose.connection.on('connected', () => {
+  console.log('MongoDB connection established');
+});
+
+mongoose.connection.on('reconnected', () => {
+  console.log('MongoDB reconnected');
 });
 
 paymentController.initScheduler();
@@ -52,6 +71,9 @@ setInterval(async () => {
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Serve static files from uploads directory
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Custom Middlewares
 app.use(require('./middleware/requestLogger')); 

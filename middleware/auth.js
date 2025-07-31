@@ -21,8 +21,7 @@ const authenticate = async (req, res, next) => {
 
     const user = await User.findById({
     _id: decoded.id,
-    'tokens.token': token,
-    isActive: true // Add this check
+    isActive: true 
     });
     if (!user) {
       return res.status(401).json({ error: 'User not found or token invalid' });

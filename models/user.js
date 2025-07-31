@@ -127,8 +127,11 @@ const userSchema = new mongoose.Schema(
     isActive: {
     type: Boolean,
     default: true, // Users are active by default
-}
-
+},
+    profilePhoto: {
+      type: String,
+      default: null,
+    }
   },
   {
     timestamps: true,
