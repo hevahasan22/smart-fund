@@ -194,7 +194,7 @@ function ValidateUpdateUser(obj) {
     password: Joi.string().min(8),
     phoneNumber: Joi.string().pattern(/^[0-9]{10,15}$/),
     DateOfBirth: Joi.date(),
-    address: Joi.string().trim().min(4).max(100),
+    address: Joi.string().trim().min(0).max(100).allow(null, ''),
     creditID: Joi.string().allow(null, '').optional(),
     gender: Joi.string().valid('female', 'male').optional(),
     employmentStatus:Joi.string().valid('Employed', 'Self-Employed', 'Unemployed', 'Student','Other').optional(),
