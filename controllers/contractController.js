@@ -181,32 +181,68 @@ exports.createContract = async (req, res) => {
       });
     }
 
-    // 7. Check sponsor availability for loan type
-    const [sponsor1Count, sponsor2Count] = await Promise.all([
+    // 7. Check if sponsors have active loans (borrowers with active loans cannot be sponsors)
+    const [sponsor1ActiveLoans, sponsor2ActiveLoans] = await Promise.all([
       Contract.countDocuments({
-        $or: [{ sponsorID_1: sponsor1._id }, { sponsorID_2: sponsor1._id }],
-        status: { $in: ['approved', 'active'] },
-        'typeTermID.loanTypeID': loanTypeRecord._id
+        userID: sponsor1._id,
+        status: { $in: ['approved', 'active'] }
       }),
       Contract.countDocuments({
-        $or: [{ sponsorID_1: sponsor2._id }, { sponsorID_2: sponsor2._id }],
-        status: { $in: ['approved', 'active'] },
-        'typeTermID.loanTypeID': loanTypeRecord._id
+        userID: sponsor2._id,
+        status: { $in: ['approved', 'active'] }
       })
     ]);
     
-    const unavailableSponsors = [];
-    if (sponsor1Count >= 2) unavailableSponsors.push(sponsorEmail1);
-    if (sponsor2Count >= 2) unavailableSponsors.push(sponsorEmail2);
+    const sponsorsWithActiveLoans = [];
+    if (sponsor1ActiveLoans > 0) sponsorsWithActiveLoans.push(sponsorEmail1);
+    if (sponsor2ActiveLoans > 0) sponsorsWithActiveLoans.push(sponsorEmail2);
     
-    if (unavailableSponsors.length > 0) {
-      return res.status(400).json({
-        error: 'One or both sponsors have reached their guarantee limit for this loan type',
-        unavailableSponsors
+    if (sponsorsWithActiveLoans.length > 0) {
+      return res.status(400).json({ 
+        error: 'One or both sponsors have active loans and cannot sponsor other loans',
+        sponsorsWithActiveLoans,
+        details: 'Borrowers with active (uncompleted) loans cannot be sponsors for other loans'
       });
     }
 
-    // 8. Get required document types using junction table
+    // 8. Check if sponsors are trying to sponsor their own contract (self-sponsorship prevention)
+    const selfSponsorshipAttempts = [];
+    if (sponsor1._id.equals(userId)) selfSponsorshipAttempts.push(sponsorEmail1);
+    if (sponsor2._id.equals(userId)) selfSponsorshipAttempts.push(sponsorEmail2);
+    
+    if (selfSponsorshipAttempts.length > 0) {
+      return res.status(400).json({ 
+        error: 'You cannot be your own sponsor',
+        selfSponsorshipAttempts,
+        details: 'Borrowers cannot sponsor their own loan contracts'
+      });
+    }
+
+    // 9. Check total sponsor limit (maximum 2 loans ever, across all loan types)
+    const [sponsor1TotalCount, sponsor2TotalCount] = await Promise.all([
+      Contract.countDocuments({
+        $or: [{ sponsorID_1: sponsor1._id }, { sponsorID_2: sponsor1._id }],
+        status: { $in: ['approved', 'active'] }
+      }),
+      Contract.countDocuments({
+        $or: [{ sponsorID_1: sponsor2._id }, { sponsorID_2: sponsor2._id }],
+        status: { $in: ['approved', 'active'] }
+      })
+    ]);
+    
+    const sponsorsAtLimit = [];
+    if (sponsor1TotalCount >= 2) sponsorsAtLimit.push(sponsorEmail1);
+    if (sponsor2TotalCount >= 2) sponsorsAtLimit.push(sponsorEmail2);
+    
+    if (sponsorsAtLimit.length > 0) {
+      return res.status(400).json({
+        error: 'One or both sponsors have reached their maximum sponsorship limit (2 loans)',
+        sponsorsAtLimit,
+        details: 'Sponsors can only sponsor a maximum of 2 loans across all loan types'
+      });
+    }
+
+    // 10. Get required document types using junction table
     const requiredDocTypeRelations = await documentTypeTermRelationModel.find({
       typeTermID: typeTerm._id,
       isRequired: true
@@ -221,7 +257,7 @@ exports.createContract = async (req, res) => {
 
     console.log(`Found ${requiredDocTypes.length} required document types for this loan type`);
 
-    // 9. Create contract
+    // 11. Create contract
     const contract = new Contract({
       userID: userId,
       sponsorID_1: sponsor1._id,
@@ -239,6 +275,13 @@ exports.createContract = async (req, res) => {
     if (requiredDocTypes.length > 0) {
       contract.status = 'pending_document_upload';
       await contract.save();
+      
+      // STEP 2: Notify borrower about contract submission
+      await notificationService.sendContractSubmissionNotification(userId, contract._id);
+      
+      // STEP 2: Notify admin about new application
+      await notificationService.sendNewApplicationNotification(contract._id);
+      
       return res.status(201).json({
         message: 'Contract created. Please upload required documents.',
         contractId: contract._id,
@@ -253,6 +296,12 @@ exports.createContract = async (req, res) => {
     } else {
       contract.status = 'pending_sponsor_approval';
       await contract.save();
+      
+      // STEP 2: Notify borrower about contract submission
+      await notificationService.sendContractSubmissionNotification(userId, contract._id);
+      
+      // STEP 2: Notify admin about new application
+      await notificationService.sendNewApplicationNotification(contract._id);
     }
 
     // 11. Notify sponsors using notification service
@@ -285,9 +334,9 @@ exports.createContract = async (req, res) => {
           }
         }
       }),
-      // Send dual notifications (in-app + email) to both sponsors
-      notificationService.sendSponsorRequest(sponsor1, borrower, loanDetails),
-      notificationService.sendSponsorRequest(sponsor2, borrower, loanDetails)
+      // STEP 3: Send sponsorship request notifications
+      notificationService.sendSponsorshipRequestNotification(sponsor1._id, userId, contract._id),
+      notificationService.sendSponsorshipRequestNotification(sponsor2._id, userId, contract._id)
     ]);
     await processContractApproval(contract);
     res.status(201).json({
@@ -374,14 +423,18 @@ exports.approveContractAsSponsor = async (req, res) => {
       $pull: { pendingApprovals: { contractId: contract._id } }
     });
     
-    // Send approval notification to the sponsor
-    await notificationService.sendSponsorApprovalNotification(sponsorId, contract._id, true);
+    // Get sponsor name for notification
+    const sponsor = await User.findById(sponsorId);
+    const sponsorName = `${sponsor.userFirstName} ${sponsor.userLastName}`;
     
     // Check if both approved
     if (contract.sponsor1Approved && contract.sponsor2Approved) {
       console.log(`Both sponsors approved contract ${contract._id}, starting processing...`);
       contract.status = 'pending_processing'; // Move to processing stage
       await contract.save();
+      
+      // STEP 4: Notify borrower about sponsor approval
+      await notificationService.sendSponsorApprovalNotification(contract.userID, contract._id, sponsorName, 0);
       
       // Send processing notification to borrower
       await notificationService.sendContractProcessingNotification(contract.userID, contract._id);
@@ -393,9 +446,15 @@ exports.approveContractAsSponsor = async (req, res) => {
       console.log(`Partial approval for contract ${contract._id} - Sponsor1: ${contract.sponsor1Approved}, Sponsor2: ${contract.sponsor2Approved}`);
       await contract.save();
 
+      // STEP 4: Notify borrower about partial approval
+      const remainingSponsors = contract.sponsor1Approved && contract.sponsor2Approved ? 0 : 1;
+      await notificationService.sendSponsorApprovalNotification(contract.userID, contract._id, sponsorName, remainingSponsors);
+      
       // Notify other sponsor about the approval
       const otherSponsorId = isSponsor1 ? contract.sponsorID_2 : contract.sponsorID_1;
-      await notificationService.sendSponsorApprovalNotification(otherSponsorId, contract._id, false);
+      const approvedCount = 1;
+      const totalCount = 2;
+      await notificationService.sendSponsorReminderNotification(otherSponsorId, contract.userID, contract._id, approvedCount, totalCount);
       
       // Notify borrower about partial approval
       await notificationService.sendPartialApprovalNotification(contract.userID, contract._id);
@@ -430,6 +489,10 @@ exports.rejectContractAsSponsor = async (req, res) => {
       return res.status(403).json({ error: 'You are not a sponsor for this contract' });
     }
     
+    // Get sponsor name for notification
+    const sponsor = await User.findById(sponsorId);
+    const sponsorName = `${sponsor.userFirstName} ${sponsor.userLastName}`;
+    
     // Update contract status
     contract.status = 'rejected';
     contract.rejectionReason = `Rejected by sponsor ${sponsorId}: ${reason || 'No reason provided'}`;
@@ -445,19 +508,16 @@ exports.rejectContractAsSponsor = async (req, res) => {
       })
     ]);
     
-    // Send rejection notifications to all parties
+    // STEP 4: Send rejection notifications
     await Promise.all([
-      // Notify the rejecting sponsor
-      notificationService.sendContractRejectionNotification(sponsorId, contract._id, reason, true),
-      // Notify the other sponsor
-      notificationService.sendContractRejectionNotification(
+      // Notify the borrower about sponsor rejection
+      notificationService.sendSponsorRejectionNotification(contract.userID, contract._id, sponsorName),
+      // Notify the other sponsor about rejection
+      notificationService.sendSponsorRejectionUpdateNotification(
         contract.sponsorID_1.equals(sponsorId) ? contract.sponsorID_2 : contract.sponsorID_1,
-        contract._id,
-        `Rejected by co-sponsor: ${reason || 'No reason provided'}`,
-        false
-      ),
-      // Notify the borrower
-      notificationService.sendContractRejectionNotification(contract.userID, contract._id, reason, false)
+        contract.userID,
+        contract._id
+      )
     ]);
     
     res.json({ message: 'Contract rejected', contract: contractToUserView(contract) });
@@ -701,12 +761,19 @@ const processSingleContract = async (contract) => {
   contract.loanID = loan._id;
   await contract.save();
 
-  // 6. Notify all parties
-  console.log('Sending approval notifications...');
+  // 6. Notify all parties about contract activation
+  console.log('Sending activation notifications...');
+  const firstPaymentDate = new Date(loan.startDate);
+  firstPaymentDate.setMonth(firstPaymentDate.getMonth() + 1);
+  
   await Promise.all([
-    notificationService.sendContractApprovalNotification(contract.userID, contract._id),
-    notificationService.sendContractApprovalNotification(contract.sponsorID_1, contract._id),
-    notificationService.sendContractApprovalNotification(contract.sponsorID_2, contract._id)
+    // STEP 5: Notify borrower about contract activation
+    notificationService.sendContractActivationNotification(contract.userID, contract._id, firstPaymentDate.toDateString()),
+    // STEP 5: Notify sponsors about contract activation
+    notificationService.sendSponsorActivationNotification(contract.sponsorID_1, contract.userID, contract._id, firstPaymentDate.toDateString()),
+    notificationService.sendSponsorActivationNotification(contract.sponsorID_2, contract.userID, contract._id, firstPaymentDate.toDateString()),
+    // STEP 5: Notify admin about contract activation
+    notificationService.sendAdminActivationNotification(contract._id, contract.userID)
   ]);
 
   console.log(`Contract ${contract._id} successfully approved and loan created`);
@@ -718,12 +785,14 @@ async function rejectContract(contract, reason, details = '') {
   contract.rejectionReason = reason;
   await contract.save();
   
-  await notificationService.sendContractRejectionNotification(
-    contract.userID, 
-    contract._id, 
-    `${reason}: ${details}`,
-    false
-  );
+  // STEP 5: Notify borrower about contract rejection
+  await notificationService.sendContractRejectionNotification(contract.userID, contract._id, reason);
+  
+  // STEP 5: Notify sponsors about contract rejection
+  await Promise.all([
+    notificationService.sendSponsorRejectionUpdateNotification(contract.sponsorID_1, contract.userID, contract._id),
+    notificationService.sendSponsorRejectionUpdateNotification(contract.sponsorID_2, contract.userID, contract._id)
+  ]);
 }
 
 // Scheduled job to process pending contracts (call this every 5 minutes)

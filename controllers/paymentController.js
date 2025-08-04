@@ -1,6 +1,7 @@
 const {Payment,Loan,User,Contract} = require('../models/index');
 const cron = require('node-cron');
 const moment = require('moment');
+const notificationService = require('../services/notificationService');
 
 // Initialize payment reminder scheduler
 exports.initScheduler = () => {
@@ -26,18 +27,14 @@ const checkUpcomingPayments = async () => {
 
     for (const payment of payments) {
       const user = payment.loanID.userID;
-      await User.findByIdAndUpdate(user._id, {
-        $push: {
-          notifications: {
-            type: 'payment_reminder',
-            message: `Payment for loan ${payment.loanID._id} is due in 3 days`,
-            paymentId: payment._id,
-            dueDate: payment.dueDate,
-            amount: payment.amount,
-            createdAt: new Date()
-          }
-        }
-      });
+      
+      // STEP 6: Send 3-day payment reminder
+      await notificationService.sendPaymentReminderNotification(
+        user._id, 
+        payment.loanID._id, 
+        payment.amount, 
+        payment.dueDate.toDateString()
+      );
     }
   } catch (error) {
     console.error('Payment reminder error:', error);
@@ -57,20 +54,17 @@ const checkLatePayments = async () => {
       payment.status = 'late';
       await payment.save();
       
-      // Notify borrower
+      // Notify borrower about late payment
       const loan = await Loan.findById(payment.loanID).populate('userID');
-      await User.findByIdAndUpdate(loan.userID._id, {
-        $push: {
-          notifications: {
-            type: 'late_payment',
-            message: `Payment for loan ${loan._id} is late! Please pay immediately.`,
-            paymentId: payment._id,
-            dueDate: payment.dueDate,
-            amount: payment.amount,
-            createdAt: new Date()
-          }
-        }
-      });
+      const penalty = Math.round(payment.amount * 0.05); // 5% late fee
+      
+      // STEP 6: Send late payment notification
+      await notificationService.sendLatePaymentNotification(
+        loan.userID._id, 
+        payment.loanID._id, 
+        payment.amount, 
+        penalty
+      );
     }
   } catch (error) {
     console.error('Late payment check error:', error);
@@ -139,6 +133,29 @@ exports.processPayment = async (req, res) => {
     if (remainingPayments === 0) {
       loan.status = 'completed';
       await loan.save();
+      
+      // STEP 7: Notify all parties about loan completion
+      await Promise.all([
+        notificationService.sendLoanCompletionNotification(borrowerId, loan._id),
+        notificationService.sendSponsorCompletionNotification(contract.sponsorID_1, borrowerId, loan._id),
+        notificationService.sendSponsorCompletionNotification(contract.sponsorID_2, borrowerId, loan._id),
+        notificationService.sendAdminCompletionNotification(loan._id, borrowerId)
+      ]);
+    } else {
+      // STEP 6: Send payment confirmation
+      const nextPayment = await Payment.findOne({
+        loanID: loan._id,
+        status: 'pending'
+      }).sort({ dueDate: 1 });
+      
+      if (nextPayment) {
+        await notificationService.sendPaymentConfirmationNotification(
+          borrowerId, 
+          loan._id, 
+          payment.amount, 
+          nextPayment.dueDate.toDateString()
+        );
+      }
     }
 
     // Create receipt
@@ -151,7 +168,7 @@ exports.processPayment = async (req, res) => {
       loanStatus: loan.status
     };
 
-    // Notify all parties
+    // Notify all parties about payment
     await notifyPayment(payment, loan, userId);
 
     res.json(receipt);
