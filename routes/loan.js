@@ -12,7 +12,7 @@ router.get('/user-loans',
 // Add route for active loan
 router.get('/active',
     authenticate,
-    loanController.getActiveLoanForUser
+    loanController.getLatestLoanForUser
 );
 
 // Loan by ID route

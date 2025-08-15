@@ -61,65 +61,85 @@ exports.getUserLoans = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // 1. Find all contracts for the user that have a loanID set
+    // 1. Find all contracts where user is either borrower or sponsor
     const { Contract } = require('../models/contract');
-    const contracts = await Contract.find({ userID: userId, loanID: { $ne: null } })
-      .populate([
-        { path: 'sponsorID_1', select: 'firstName lastName' },
-        { path: 'sponsorID_2', select: 'firstName lastName' },
-        { path: 'userID', select: 'firstName lastName email' },
-        {
-          path: 'typeTermID',
-          populate: [
-            { path: 'loanTypeID', select: 'loanName' },
-            { path: 'loanTermID', select: 'termName' }
-          ]
-        }
-      ]);
+    const contracts = await Contract.find({
+      $or: [
+        { userID: userId, loanID: { $ne: null } }, // User as borrower
+        { sponsorID_1: userId, loanID: { $ne: null } }, // User as sponsor 1
+        { sponsorID_2: userId, loanID: { $ne: null } }  // User as sponsor 2
+      ]
+    })
+    .populate([
+      { path: 'userID', select: 'userFirstName userLastName' },
+      { path: 'sponsorID_1', select: 'userFirstName userLastName' },
+      { path: 'sponsorID_2', select: 'userFirstName userLastName' },
+      {
+        path: 'typeTermID',
+        populate: [
+          { path: 'loanTypeID', select: 'loanName' },
+          { path: 'loanTermID', select: 'termName' }
+        ]
+      }
+    ]);
 
     // 2. Get all loan IDs from these contracts
     const loanIds = contracts.map(contract => contract.loanID).filter(Boolean);
 
-    // 3. Find all loans with those IDs
+    // 3. Find all loans with those IDs, but only select startDate and _id
     const loans = await Loan.find({ _id: { $in: loanIds } })
+      .select('startDate _id')
       .sort({ startDate: -1 }); // Newest loans first
 
-    // 4. Fetch all payments for these loans
-    const payments = await Payment.find({ loanID: { $in: loanIds } });
-
-    // 5. Group payments by loanID
-    const paymentsByLoan = payments.reduce((acc, payment) => {
-      const key = payment.loanID.toString();
-      if (!acc[key]) acc[key] = [];
-      acc[key].push(payment);
-      return acc;
-    }, {});
-
-    // 6. Join contract data and payments to each loan, and add summary fields
-    const loansWithContracts = loans.map(loan => {
+    // 4. Create simplified response with start date, loan type name, loan ID, and user role
+    const simplifiedLoans = loans.map(loan => {
       const contract = contracts.find(c => c.loanID && c.loanID.equals(loan._id));
-      const payments = paymentsByLoan[loan._id.toString()] || [];
-      const totalAmount = loan.loanAmount;
-      const paidAmount = Math.round(payments.reduce((sum, payment) => payment.status === 'paid' ? sum + payment.amount : sum, 0));
-      const remainingAmount = Math.round(totalAmount - paidAmount);
-      const loanObj = loan.toObject();
-      // Replace typeTermID with the name if available
-      if (contract && contract.typeTermID && contract.typeTermID.name) {
-        loanObj.typeTermID = contract.typeTermID.name;
-      } else {
-        delete loanObj.typeTermID;
+      const loanTypeName = contract?.typeTermID?.loanTypeID?.loanName || 'Unknown';
+      
+      // Determine user's role in this loan
+      let userRole = 'unknown';
+      let borrowerName = '';
+      let sponsorNames = [];
+      
+      if (contract) {
+        if (contract.userID && contract.userID._id.equals(userId)) {
+          userRole = 'borrower';
+          borrowerName = `${contract.userID.userFirstName} ${contract.userID.userLastName}`;
+          // Get sponsor names
+          if (contract.sponsorID_1) {
+            sponsorNames.push(`${contract.sponsorID_1.userFirstName} ${contract.sponsorID_1.userLastName}`);
+          }
+          if (contract.sponsorID_2) {
+            sponsorNames.push(`${contract.sponsorID_2.userFirstName} ${contract.sponsorID_2.userLastName}`);
+          }
+        } else if (contract.sponsorID_1 && contract.sponsorID_1._id.equals(userId)) {
+          userRole = 'sponsor';
+          borrowerName = `${contract.userID.userFirstName} ${contract.userID.userLastName}`;
+          // Get other sponsor name
+          if (contract.sponsorID_2) {
+            sponsorNames.push(`${contract.sponsorID_2.userFirstName} ${contract.sponsorID_2.userLastName}`);
+          }
+        } else if (contract.sponsorID_2 && contract.sponsorID_2._id.equals(userId)) {
+          userRole = 'sponsor';
+          borrowerName = `${contract.userID.userFirstName} ${contract.userID.userLastName}`;
+          // Get other sponsor name
+          if (contract.sponsorID_1) {
+            sponsorNames.push(`${contract.sponsorID_1.userFirstName} ${contract.sponsorID_1.userLastName}`);
+          }
+        }
       }
+      
       return {
-        ...loanObj,
-        contract: contract ? contract.toObject() : null,
-        payments,
-        totalAmount,
-        paidAmount,
-        remainingAmount
+        loanId: loan._id,
+        startDate: loan.startDate,
+        loanTypeName: loanTypeName,
+        userRole: userRole,
+        borrowerName: borrowerName,
+        sponsorNames: sponsorNames
       };
     });
 
-    res.json(loansWithContracts);
+    res.json(simplifiedLoans);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -144,8 +164,8 @@ exports.getLoanById = async (req, res) => {
     const { Contract } = require('../models/contract');
     const contract = await Contract.findOne({ loanID: loan._id })
       .populate([
-        { path: 'sponsorID_1', select: 'firstName lastName' },
-        { path: 'sponsorID_2', select: 'firstName lastName' },
+        { path: 'sponsorID_1', select: 'userFirstName userLastName email' },
+        { path: 'sponsorID_2', select: 'userFirstName userLastName email' },
         { path: 'userID', select: 'firstName lastName email' },
         {
           path: 'typeTermID',
@@ -170,14 +190,43 @@ exports.getLoanById = async (req, res) => {
       payment.status === 'paid' ? sum + payment.amount : sum, 0));
     const remainingAmount = Math.round(totalAmount - paidAmount);
     
-    // Add calculated fields and contract to response
+    // Prepare sponsor info
+    let sponsors = [];
+    if (contract) {
+      if (contract.sponsorID_1) {
+        sponsors.push({
+          id: contract.sponsorID_1._id,
+          name: `${contract.sponsorID_1.userFirstName} ${contract.sponsorID_1.userLastName}`,
+          email: contract.sponsorID_1.email
+        });
+      }
+      if (contract.sponsorID_2) {
+        sponsors.push({
+          id: contract.sponsorID_2._id,
+          name: `${contract.sponsorID_2.userFirstName} ${contract.sponsorID_2.userLastName}`,
+          email: contract.sponsorID_2.email
+        });
+      }
+    }
+    
+    // Add calculated fields, contract, and sponsors to response
     const loanWithSummary = {
-      ...loan.toObject(),
+      loan: {
+        loanAmount: loan.loanAmount,
+        loanTermMonths: loan.loanTermMonths,
+        startDate: loan.startDate,
+        endDate: loan.endDate,
+        interestRate: loan.interestRate,
+        typeTermID: loan.typeTermID,
+        status: loan.status,
+        createdAt: loan.createdAt,
+        updatedAt: loan.updatedAt
+      },
       totalAmount,
       paidAmount,
       remainingAmount,
-      contract: contract ? contract.toObject() : null,
-      payments
+      payments,
+      sponsors
     };
 
     // Replace typeTermID with the name if available
@@ -226,8 +275,8 @@ const calculateMonthlyPayment = (principal, annualRate, termMonths) => {
   return Math.round(payment); // Round to nearest integer
 };
 
-// Get the active loan for the logged-in user
-exports.getActiveLoanForUser = async (req, res) => {
+// Get the latest loan for the logged-in user
+exports.getLatestLoanForUser = async (req, res) => {
   try {
     const userId = req.user.id;
 
@@ -238,11 +287,12 @@ exports.getActiveLoanForUser = async (req, res) => {
     // Get all loan IDs from these contracts
     const loanIds = contracts.map(contract => contract.loanID).filter(Boolean);
 
-    // Find the active loan (assuming only one active at a time)
-    const loan = await Loan.findOne({ _id: { $in: loanIds }, status: 'active' });
+    // Find the latest loan by start date (most recent)
+    const loan = await Loan.findOne({ _id: { $in: loanIds } })
+      .sort({ startDate: -1 }); // Sort by start date descending to get the latest
     if (!loan) return res.json(null);
 
-    // Fetch the contract for this active loan, and populate sponsors
+    // Fetch the contract for this latest loan, and populate sponsors
     const contract = await Contract.findOne({ loanID: loan._id })
       .populate([
         { path: 'sponsorID_1', select: 'userFirstName userLastName email' },
@@ -296,5 +346,5 @@ module.exports = {
   createLoan,
   getUserLoans: exports.getUserLoans,
   getLoanById: exports.getLoanById,
-  getActiveLoanForUser: exports.getActiveLoanForUser
+  getLatestLoanForUser: exports.getLatestLoanForUser
 };

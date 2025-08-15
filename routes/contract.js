@@ -10,33 +10,6 @@ const express = require('express');
        contractController.createContract
      );
 
-     // Get user contracts
-     router.get(
-       '/my-contracts',
-       authenticate,
-       contractController.getUserContracts
-     );
-
-       // Get user contracts (singular)
-       router.get(
-        '/my-contract/:id',
-        authenticate,
-        contractController.getUserContract
-      );
-      // Get user contracts (plural alias)
-      router.get(
-        '/my-contracts/:id',
-        authenticate,
-        contractController.getUserContract
-      );
-
-     // Get sponsor contracts
-     router.get(
-       '/sponsor-contracts',
-       authenticate,
-       contractController.getSponsorContracts
-     );
-
      // Sponsor approves a contract
      router.post(
        '/:contractId/approve',
@@ -100,6 +73,13 @@ const express = require('express');
      router.get(
        '/required-documents/:loanTypeId',
        contractController.getRequiredDocuments
+     );
+
+     // Get user contracts that are still not approved
+     router.get(
+       '/pending-contracts',
+       authenticate,
+       contractController.getUserPendingContracts
      );
 
     /*

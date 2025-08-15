@@ -832,97 +832,6 @@ exports.triggerContractProcessing = async (req, res) => {
   }
 };
 
-
-// Get all user contracts
-exports.getUserContracts = async (req, res) => {
-  try {
-    const contracts = await Contract.find({ userID: req.user.id })
-      .populate('sponsorID_1', 'userFirstName userLastName') // Sponsor 1 info
-      .populate('sponsorID_2', 'userFirstName userLastName') // Sponsor 2 info
-      .populate({
-        path: 'typeTermID',
-        populate: [
-          { path: 'loanTypeID', select: 'loanName minAmount maxAmount priority' },
-          { path: 'loanTermID', select: 'termName minTerm maxTerm' }
-        ]
-      })
-      .sort({ createdAt: -1 }); // Newest first
-
-    // Add loan details to response for frontend display
-    const contractsWithLoanDetails = contracts.map(contract => {
-      const contractObj = contract.toObject();
-      return {
-        ...contractObj,
-        loanAmount: contract.tempLoanAmount,
-        loanTermMonths: contract.tempLoanTermMonths,
-        startDate: contract.tempStartDate
-      };
-    });
-
-    res.json(contractsWithLoanDetails.map(contractToUserView));
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-// Get a single contract by ID
-exports.getUserContract = async (req, res) => {
-  try {
-    const contractId = req.params.id;
-    const contract = await Contract.findById(contractId)
-      .populate('sponsorID_1', 'userFirstName userLastName')
-      .populate('sponsorID_2', 'userFirstName userLastName')
-      .populate({
-        path: 'typeTermID',
-        populate: [
-          { path: 'loanTypeID', select: 'loanName minAmount maxAmount priority' },
-          { path: 'loanTermID', select: 'termName minTerm maxTerm' }
-        ]
-      });
-    if (!contract) {
-      return res.status(404).json({ error: 'Contract not found' });
-    }
-    res.json(contractToUserView(contract));
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-// Get all contracts where the user is a sponsor
-exports.getSponsorContracts = async (req, res) => {
-  try {
-    const sponsorId = req.user.id;
-    
-    // Find contracts where user is either sponsor1 or sponsor2
-    const contracts = await Contract.find({
-      $or: [
-        { sponsorID_1: sponsorId },
-        { sponsorID_2: sponsorId }
-      ]
-    })
-    .populate('userID', 'userFirstName userLastName') // Borrower info
-    .populate('typeTermID')
-    .populate('sponsorID_1', 'userFirstName userLastName') // Sponsor 1 info
-    .populate('sponsorID_2', 'userFirstName userLastName') // Sponsor 2 info
-    .sort({ createdAt: -1 }); // Newest first
-
-    // Add loan details to response for frontend display
-    const contractsWithLoanDetails = contracts.map(contract => {
-      const contractObj = contract.toObject();
-      return {
-        ...contractObj,
-        loanAmount: contract.tempLoanAmount,
-        loanTermMonths: contract.tempLoanTermMonths,
-        startDate: contract.tempStartDate
-      };
-    });
-
-    res.json(contractsWithLoanDetails.map(contractToUserView));
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
 // Get user notifications
 exports.getUserNotifications = async (req, res) => {
   try {
@@ -976,6 +885,49 @@ exports.getUserNotifications = async (req, res) => {
     });
   } catch (error) {
     console.error('Error in getUserNotifications:', error);
+    res.status(500).json({ 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+};
+
+// Get user contracts that are still not approved
+exports.getUserPendingContracts = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    
+    console.log('Getting pending contracts for user:', userId);
+    
+    // Find all contracts for the user that are not approved
+    const pendingContracts = await Contract.find({ 
+      userID: userId, 
+      status: { $ne: 'approved' } 
+    })
+    .populate([
+      { path: 'sponsorID_1', select: 'userFirstName userLastName email' },
+      { path: 'sponsorID_2', select: 'userFirstName userLastName email' },
+      {
+        path: 'typeTermID',
+        populate: [
+          { path: 'loanTypeID', select: 'loanName minAmount maxAmount' },
+          { path: 'loanTermID', select: 'termName minTerm maxTerm' }
+        ]
+      }
+    ])
+    .sort({ createdAt: -1 }); // Newest contracts first
+    
+    console.log(`Found ${pendingContracts.length} pending contracts for user ${userId}`);
+    
+    // Transform contracts to user-friendly format
+    const transformedContracts = pendingContracts.map(contract => contractToUserView(contract));
+    
+    res.json({
+      pendingContracts: transformedContracts,
+      count: pendingContracts.length
+    });
+  } catch (error) {
+    console.error('Error in getUserPendingContracts:', error);
     res.status(500).json({ 
       error: error.message,
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
