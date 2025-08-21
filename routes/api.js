@@ -16,6 +16,7 @@ const adminRoutes=require('./admin');
 const docTypeRoutes=require('./additionalDocumentType');
 const docRouts=require('./additionalDocumet');
 const relationRoutes=require('./documentTypeTermRelation');
+const notificationRoutes=require('./notifications');
 
 // Mount routes with proper error handling
 router.use('/upload', asyncHandler(uploadRoutes));
@@ -31,6 +32,7 @@ router.use('/admins',asyncHandler(adminRoutes));
 router.use('/docTypes', asyncHandler(docTypeRoutes));
 router.use('/docs', asyncHandler(docRouts));
 router.use('/document-relations', asyncHandler(relationRoutes));
+router.use('/notifications', asyncHandler(notificationRoutes));
 
 // Export the router
 module.exports = router;

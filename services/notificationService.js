@@ -1,102 +1,33 @@
-const nodemailer = require('nodemailer');
 const { User } = require('../models/user');
-require('dotenv').config()
-const mongoose = require('mongoose');
+require('dotenv').config();
 
-// Email configuration with error handling
-let transporter;
-try {
-  transporter = nodemailer.createTransport({
-    service: 'Gmail',
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASS
-    }
-  });
-  
-  // Test email configuration
-  transporter.verify(function(error, success) {
-    if (error) {
-      console.error('Email configuration error:', error);
-    } else {
-      console.log('Email server is ready to send messages');
-    }
-  });
-} catch (error) {
-  console.error('Failed to create email transporter:', error);
-  transporter = null;
-}
+// Facade modules
+const contracts = require('./notifications/contracts');
+const documents = require('./notifications/documents');
+const sponsorships = require('./notifications/sponsorships');
+const payments = require('./notifications/payments');
+const { createInAppNotification } = require('./notifications/helpers');
 
-// Create in-app notification
-exports.createNotification = async (userId, type, message, contractId = null) => {
-  try {
-    await User.findByIdAndUpdate(userId, {
-      $push: {
-        notifications: {
-          _id: new mongoose.Types.ObjectId(), // Ensure each notification has an _id
-          type,
-          message,
-          contractId,
-          createdAt: new Date(),
-          isRead: false
-        }
-      }
-    });
-  } catch (error) {
-    console.error('Error creating notification:', error);
-  }
-};
+// Backward compatible core helpers
+exports.createNotification = createInAppNotification;
 
-// Send both in-app and email notification
 exports.sendDualNotification = async (userId, type, message, contractId = null, emailSubject = null, emailHtml = null) => {
   try {
-    // Create in-app notification first (this should always work)
-    await this.createNotification(userId, type, message, contractId);
-    console.log(`In-app notification created for user ${userId}: ${type}`);
-    
-    // Send email notification if email details provided and transporter is available
-    if (emailSubject && emailHtml && transporter) {
-      const user = await User.findById(userId);
-      if (user && user.email) {
-        const mailOptions = {
-          to: user.email,
-          subject: emailSubject,
-          html: emailHtml
-        };
-        
-        // Add timeout to prevent hanging connections
-        const emailPromise = transporter.sendMail(mailOptions);
-        const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('Email timeout')), 10000); // 10 second timeout
-        });
-        
-        await Promise.race([emailPromise, timeoutPromise]);
-        console.log(`Email sent to ${user.email}: ${emailSubject}`);
-      } else {
-        console.warn(`User ${userId} not found or has no email address`);
-      }
-    } else if (!transporter) {
-      console.warn('Email transporter not available. Only in-app notification sent.');
+    await createInAppNotification(userId, type, message, contractId);
+    if (emailSubject && emailHtml) {
+      // Lazy import to avoid circular
+      const { sendEmail } = require('./notifications/helpers');
+      await sendEmail(userId, emailSubject, emailHtml);
     }
   } catch (error) {
     console.error('Error sending dual notification:', error);
-    
-    // Still try to send in-app notification even if email fails
-    try {
-      await this.createNotification(userId, type, message, contractId);
-      console.log(`Fallback in-app notification sent for user ${userId}`);
-    } catch (inAppError) {
-      console.error('Failed to send in-app notification as fallback:', inAppError);
-    }
   }
 };
 
-// Send in-app only notification
 exports.sendInAppOnly = async (userId, type, message, contractId = null) => {
-  await this.createNotification(userId, type, message, contractId);
+  await createInAppNotification(userId, type, message, contractId);
 };
 
-// Mark notification as read
 exports.markNotificationAsRead = async (userId, notificationId) => {
   try {
     await User.updateOne(
@@ -108,7 +39,6 @@ exports.markNotificationAsRead = async (userId, notificationId) => {
   }
 };
 
-// Get user notifications
 exports.getUserNotifications = async (userId, limit = 50) => {
   try {
     const user = await User.findById(userId).select('notifications');
@@ -121,7 +51,6 @@ exports.getUserNotifications = async (userId, limit = 50) => {
   }
 };
 
-// Get unread notification count
 exports.getUnreadNotificationCount = async (userId) => {
   try {
     const user = await User.findById(userId).select('notifications');
@@ -132,41 +61,12 @@ exports.getUnreadNotificationCount = async (userId) => {
   }
 };
 
-// Helper to get contract details for notifications
-async function getContractDetails(contractId) {
-  const { Contract } = require('../models/contract');
-  const contract = await Contract.findById(contractId)
-    .populate({ path: 'typeTermID', populate: { path: 'loanTypeID', select: 'loanName' } });
-  return contract ? {
-    loanType: contract.typeTermID?.loanTypeID?.loanName,
-    amount: contract.tempLoanAmount,
-    term: contract.tempLoanTermMonths
-  } : {};
-}
-
-// Helper to get loan details for notifications
-async function getLoanDetails(loanId) {
-  const { Loan } = require('../models/loan');
-  const loan = await Loan.findById(loanId)
-    .populate({ path: 'typeTermID', populate: { path: 'loanTypeID', select: 'loanName' } });
-  return loan ? {
-    loanType: loan.typeTermID?.loanTypeID?.loanName,
-    amount: loan.loanAmount,
-    term: loan.loanTermMonths
-  } : {};
-}
-
-// ============================================================================
-// STEP 1: User Login - Red badge for pending actions
-// ============================================================================
-
-// Check for pending actions when user logs in
+// Domain re-exports (keep names as in existing controllers)
 exports.checkPendingActions = async (userId) => {
   try {
     const user = await User.findById(userId);
     const unreadCount = user.notifications.filter(n => !n.isRead).length;
     const pendingApprovals = user.pendingApprovals ? user.pendingApprovals.length : 0;
-    
     return {
       hasPendingActions: unreadCount > 0 || pendingApprovals > 0,
       unreadNotifications: unreadCount,
@@ -178,418 +78,36 @@ exports.checkPendingActions = async (userId) => {
   }
 };
 
-// ============================================================================
-// STEP 2: Contract Application Submitted
-// ============================================================================
+// Contracts
+exports.sendContractSubmissionNotification = contracts.sendContractSubmissionNotification;
+exports.sendNewApplicationNotification = contracts.sendNewApplicationNotification;
+exports.sendContractActivationNotification = contracts.sendContractActivationNotification;
+exports.sendSponsorActivationNotification = sponsorships.sendSponsorActivationNotification;
+exports.sendAdminActivationNotification = contracts.sendAdminActivationNotification;
+exports.sendContractRejectionNotification = contracts.sendContractRejectionNotification;
 
-// Notify borrower about contract submission
-exports.sendContractSubmissionNotification = async (borrowerId, contractId) => {
-  const details = await getContractDetails(contractId);
-  const message = `Your ${details.loanType} (${details.term} months) application was submitted! Status: Awaiting Document Verification.`;
-  const emailSubject = 'Loan Application Submitted';
-  const emailHtml = `
-    <p>Hello,</p>
-    <p>Your loan application has been successfully submitted!</p>
-    <ul>
-      <li>Loan Type: ${details.loanType}</li>
-      <li>Term: ${details.term} months</li>
-      <li>Amount: $${details.amount}</li>
-    </ul>
-    <p>Status: Awaiting Document Verification</p>
-    <p>You will be notified once your documents have been reviewed.</p>
-    <p>Best regards,<br>Smart Fund Team</p>
-  `;
-  
-  await this.sendDualNotification(borrowerId, 'contract_submitted', message, contractId, emailSubject, emailHtml);
-};
+// Documents
+exports.sendDocumentApprovalNotification = documents.sendDocumentApprovalNotification;
+exports.sendDocumentRejectionNotification = documents.sendDocumentRejectionNotification;
+exports.sendDocumentPendingReview = documents.sendDocumentPendingReview;
+exports.sendContractDocumentCompletionNotification = documents.sendContractDocumentCompletionNotification;
 
-// Notify admin about new application
-exports.sendNewApplicationNotification = async (contractId) => {
-  const details = await getContractDetails(contractId);
-  const message = `New application: ${details.loanType} (${details.term} months) requires document review.`;
-  const emailSubject = 'New Loan Application - Document Review Required';
-  const emailHtml = `
-    <p>Hello Admin,</p>
-    <p>A new loan application has been submitted and requires document review:</p>
-    <ul>
-      <li>Loan Type: ${details.loanType}</li>
-      <li>Term: ${details.term} months</li>
-      <li>Amount: $${details.amount}</li>
-    </ul>
-    <p>Please log in to the admin panel to review the submitted documents.</p>
-    <p>Best regards,<br>Smart Fund Team</p>
-  `;
-  
-  // Get all admin users
-  const admins = await User.find({ role: 'admin' });
-  for (const admin of admins) {
-    await this.sendDualNotification(admin._id, 'new_application', message, contractId, emailSubject, emailHtml);
-  }
-};
+// Sponsorships
+exports.sendSponsorshipRequestNotification = sponsorships.sendSponsorshipRequestNotification;
+exports.sendSponsorApprovalNotification = sponsorships.sendSponsorApprovalNotification;
+exports.sendSponsorReminderNotification = sponsorships.sendSponsorReminderNotification;
+exports.sendSponsorRejectionNotification = sponsorships.sendSponsorRejectionNotification;
+exports.sendSponsorRejectionUpdateNotification = sponsorships.sendSponsorRejectionUpdateNotification;
 
-// ============================================================================
-// STEP 3: Document Review (Admin)
-// ============================================================================
+// Payments
+exports.sendPaymentReminderNotification = payments.sendPaymentReminderNotification;
+exports.sendPaymentConfirmationNotification = payments.sendPaymentConfirmationNotification;
+exports.sendLatePaymentNotification = payments.sendLatePaymentNotification;
+exports.sendLoanCompletionNotification = payments.sendLoanCompletionNotification;
+exports.sendSponsorCompletionNotification = payments.sendSponsorCompletionNotification;
+exports.sendAdminCompletionNotification = payments.sendAdminCompletionNotification;
 
-// Notify borrower when documents are approved
-exports.sendDocumentApprovalNotification = async (borrowerId, contractId) => {
-  const details = await getContractDetails(contractId);
-  const message = `Documents approved! Sponsors will now review your ${details.loanType} (${details.term} months).`;
-  
-  // In-app only for document approval
-  await this.sendInAppOnly(borrowerId, 'documents_approved', message, contractId);
-};
-
-// Notify borrower when documents are rejected
-exports.sendDocumentRejectionNotification = async (borrowerId, contractId, reason) => {
-  const details = await getContractDetails(contractId);
-  const message = `Document Revision Needed: ${reason} for ${details.loanType} (${details.term} months).`;
-  const emailSubject = 'Document Revision Required';
-  const emailHtml = `
-    <p>Hello,</p>
-    <p>Your documents require revision before your loan application can proceed.</p>
-    <p><strong>Loan Type:</strong> ${details.loanType}</p>
-    <p><strong>Term:</strong> ${details.term} months</p>
-    <p><strong>Reason for Revision:</strong> ${reason}</p>
-    <p>Please review the requirements and re-upload the necessary documents.</p>
-    <p>Best regards,<br>Smart Fund Team</p>
-  `;
-  
-  await this.sendDualNotification(borrowerId, 'document_revision_needed', message, contractId, emailSubject, emailHtml);
-};
-
-// Notify sponsors when documents are approved and sponsorship is requested
-exports.sendSponsorshipRequestNotification = async (sponsorId, borrowerId, contractId) => {
-  const details = await getContractDetails(contractId);
-  const borrower = await User.findById(borrowerId);
-  const message = `Action Required: ${borrower.userFirstName} ${borrower.userLastName} has requested you to sponsor their $${details.amount} ${details.loanType} (${details.term} months)`;
-  const emailSubject = 'Sponsorship Request - Action Required';
-  const emailHtml = `
-    <p>Hello,</p>
-    <p>${borrower.userFirstName} ${borrower.userLastName} has requested you to sponsor their loan:</p>
-    <ul>
-      <li>Loan Type: ${details.loanType}</li>
-      <li>Amount: $${details.amount}</li>
-      <li>Term: ${details.term} months</li>
-    </ul>
-    <p>Please log in to the platform to accept or decline this sponsorship request.</p>
-    <p>Best regards,<br>Smart Fund Team</p>
-  `;
-  
-  await this.sendDualNotification(sponsorId, 'sponsorship_request', message, contractId, emailSubject, emailHtml);
-};
-
-// ============================================================================
-// STEP 4: Sponsor Approval Phase
-// ============================================================================
-
-// Notify borrower when a sponsor approves
-exports.sendSponsorApprovalNotification = async (borrowerId, contractId, sponsorName, remainingSponsors) => {
-  const details = await getContractDetails(contractId);
-  const message = `${sponsorName} approved your ${details.loanType} (${details.term} months)! Waiting on ${remainingSponsors} more sponsors.`;
-  
-  // In-app only for sponsor approval
-  await this.sendInAppOnly(borrowerId, 'sponsor_approved', message, contractId);
-};
-
-// Notify other sponsors when one sponsor approves
-exports.sendSponsorReminderNotification = async (sponsorId, borrowerId, contractId, approvedCount, totalCount) => {
-  const details = await getContractDetails(contractId);
-  const borrower = await User.findById(borrowerId);
-  const message = `Reminder: ${borrower.userFirstName} ${borrower.userLastName} needs your sponsorship for ${details.loanType} (${details.term} months) - ${approvedCount}/${totalCount} approved`;
-  const emailSubject = 'Sponsorship Reminder - Action Required';
-  const emailHtml = `
-    <p>Hello,</p>
-    <p>This is a reminder that ${borrower.userFirstName} ${borrower.userLastName} needs your sponsorship for their loan:</p>
-    <ul>
-      <li>Loan Type: ${details.loanType}</li>
-      <li>Amount: $${details.amount}</li>
-      <li>Term: ${details.term} months</li>
-    </ul>
-    <p>Status: ${approvedCount}/${totalCount} sponsors have approved</p>
-    <p>Please log in to the platform to make your decision.</p>
-    <p>Best regards,<br>Smart Fund Team</p>
-  `;
-  
-  await this.sendDualNotification(sponsorId, 'sponsorship_reminder', message, contractId, emailSubject, emailHtml);
-};
-
-// Notify borrower when a sponsor rejects
-exports.sendSponsorRejectionNotification = async (borrowerId, contractId, sponsorName) => {
-  const details = await getContractDetails(contractId);
-  const message = `Sponsor Declined: ${sponsorName} can't support your ${details.loanType} (${details.term} months).`;
-  const emailSubject = 'Sponsor Declined - Action Required';
-  const emailHtml = `
-    <p>Hello,</p>
-    <p>Unfortunately, ${sponsorName} has declined to sponsor your loan application.</p>
-    <p><strong>Loan Details:</strong></p>
-    <ul>
-      <li>Loan Type: ${details.loanType}</li>
-      <li>Amount: $${details.amount}</li>
-      <li>Term: ${details.term} months</li>
-    </ul>
-    <p>You may need to find an alternative sponsor or contact our support team for assistance.</p>
-    <p>Best regards,<br>Smart Fund Team</p>
-  `;
-  
-  await this.sendDualNotification(borrowerId, 'sponsor_declined', message, contractId, emailSubject, emailHtml);
-};
-
-// Notify other sponsors when one sponsor rejects
-exports.sendSponsorRejectionUpdateNotification = async (sponsorId, borrowerId, contractId) => {
-  const details = await getContractDetails(contractId);
-  const borrower = await User.findById(borrowerId);
-  const message = `Update: ${borrower.userFirstName} ${borrower.userLastName}'s ${details.loanType} (${details.term} months) requires alternate sponsor.`;
-  
-  // In-app only for sponsor rejection update
-  await this.sendInAppOnly(sponsorId, 'sponsor_rejection_update', message, contractId);
-};
-
-// ============================================================================
-// STEP 5: Contract Finalization
-// ============================================================================
-
-// Notify borrower when contract is activated
-exports.sendContractActivationNotification = async (borrowerId, contractId, firstPaymentDate) => {
-  const details = await getContractDetails(contractId);
-  const message = `Loan Activated! Your ${details.loanType} (${details.term} months) is live. First payment due: ${firstPaymentDate}.`;
-  const emailSubject = 'Loan Activated - Payment Schedule Available';
-  const emailHtml = `
-    <p>Congratulations!</p>
-    <p>Your loan has been successfully activated!</p>
-    <ul>
-      <li>Loan Type: ${details.loanType}</li>
-      <li>Amount: $${details.amount}</li>
-      <li>Term: ${details.term} months</li>
-      <li>First Payment Due: ${firstPaymentDate}</li>
-    </ul>
-    <p>Please log in to view your complete payment schedule and make your first payment on time.</p>
-    <p>Best regards,<br>Smart Fund Team</p>
-  `;
-  
-  await this.sendDualNotification(borrowerId, 'contract_activated', message, contractId, emailSubject, emailHtml);
-};
-
-// Notify sponsors when contract is activated
-exports.sendSponsorActivationNotification = async (sponsorId, borrowerId, contractId, firstPaymentDate) => {
-  const details = await getContractDetails(contractId);
-  const borrower = await User.findById(borrowerId);
-  const message = `You're now sponsoring ${borrower.userFirstName} ${borrower.userLastName}'s ${details.loanType} (${details.term} months)! First payment: ${firstPaymentDate}.`;
-  const emailSubject = 'Sponsorship Activated - Loan Live';
-  const emailHtml = `
-    <p>Hello,</p>
-    <p>You are now officially sponsoring ${borrower.userFirstName} ${borrower.userLastName}'s loan:</p>
-    <ul>
-      <li>Loan Type: ${details.loanType}</li>
-      <li>Amount: $${details.amount}</li>
-      <li>Term: ${details.term} months</li>
-      <li>First Payment Due: ${firstPaymentDate}</li>
-    </ul>
-    <p>You will be notified of all payment activities for this loan.</p>
-    <p>Best regards,<br>Smart Fund Team</p>
-  `;
-  
-  await this.sendDualNotification(sponsorId, 'sponsorship_activated', message, contractId, emailSubject, emailHtml);
-};
-
-// Notify admin when contract is activated
-exports.sendAdminActivationNotification = async (contractId, borrowerId) => {
-  const details = await getContractDetails(contractId);
-  const borrower = await User.findById(borrowerId);
-  const message = `Contract Activated: ${details.loanType} (${details.term} months) for ${borrower.userFirstName} ${borrower.userLastName}`;
-  const emailSubject = 'Contract Activated - New Loan Live';
-  const emailHtml = `
-    <p>Hello Admin,</p>
-    <p>A new contract has been activated:</p>
-    <ul>
-      <li>Borrower: ${borrower.userFirstName} ${borrower.userLastName}</li>
-      <li>Loan Type: ${details.loanType}</li>
-      <li>Amount: $${details.amount}</li>
-      <li>Term: ${details.term} months</li>
-    </ul>
-    <p>Best regards,<br>Smart Fund Team</p>
-  `;
-  
-  // Get all admin users
-  const admins = await User.find({ role: 'admin' });
-  for (const admin of admins) {
-    await this.sendDualNotification(admin._id, 'contract_activated_admin', message, contractId, emailSubject, emailHtml);
-  }
-};
-
-// Notify borrower when contract is rejected
-exports.sendContractRejectionNotification = async (borrowerId, contractId, reason) => {
-  const details = await getContractDetails(contractId);
-  const message = `Application Declined: ${details.loanType} (${details.term} months) - ${reason}.`;
-  const emailSubject = 'Loan Application Declined';
-  const emailHtml = `
-    <p>Hello,</p>
-    <p>Unfortunately, your loan application has been declined.</p>
-    <p><strong>Loan Details:</strong></p>
-    <ul>
-      <li>Loan Type: ${details.loanType}</li>
-      <li>Amount: $${details.amount}</li>
-      <li>Term: ${details.term} months</li>
-    </ul>
-    <p><strong>Reason for Decline:</strong> ${reason}</p>
-    <p>Please contact our support team if you have any questions.</p>
-    <p>Best regards,<br>Smart Fund Team</p>
-  `;
-  
-  await this.sendDualNotification(borrowerId, 'contract_rejected', message, contractId, emailSubject, emailHtml);
-};
-
-// Notify sponsors when contract is rejected
-exports.sendSponsorRejectionUpdateNotification = async (sponsorId, borrowerId, contractId) => {
-  const details = await getContractDetails(contractId);
-  const borrower = await User.findById(borrowerId);
-  const message = `Update: ${borrower.userFirstName} ${borrower.userLastName}'s ${details.loanType} (${details.term} months) was not approved.`;
-  
-  // In-app only for contract rejection update to sponsors
-  await this.sendInAppOnly(sponsorId, 'contract_rejection_update', message, contractId);
-};
-
-// ============================================================================
-// STEP 6: Payment Cycle
-// ============================================================================
-
-// Send 3-day payment reminder
-exports.sendPaymentReminderNotification = async (borrowerId, loanId, amount, dueDate) => {
-  const details = await getLoanDetails(loanId);
-  const message = `Upcoming Payment: $${amount} for ${details.loanType} (${details.term} months) due in 3 days.`;
-  const emailSubject = 'Payment Reminder - Due in 3 Days';
-  const emailHtml = `
-    <p>Hello,</p>
-    <p>This is a friendly reminder that your payment is due soon:</p>
-    <ul>
-      <li>Loan Type: ${details.loanType}</li>
-      <li>Amount Due: $${amount}</li>
-      <li>Due Date: ${dueDate}</li>
-    </ul>
-    <p>Please make your payment on time to avoid late fees.</p>
-    <p>Best regards,<br>Smart Fund Team</p>
-  `;
-  
-  await this.sendDualNotification(borrowerId, 'payment_reminder', message, null, emailSubject, emailHtml);
-};
-
-// Send payment confirmation
-exports.sendPaymentConfirmationNotification = async (borrowerId, loanId, amount, nextPaymentDate) => {
-  const details = await getLoanDetails(loanId);
-  const message = `Payment Confirmed: $${amount} applied to ${details.loanType} (${details.term} months). Next due: ${nextPaymentDate}.`;
-  const emailSubject = 'Payment Confirmed';
-  const emailHtml = `
-    <p>Hello,</p>
-    <p>Your payment has been successfully processed!</p>
-    <ul>
-      <li>Loan Type: ${details.loanType}</li>
-      <li>Amount Paid: $${amount}</li>
-      <li>Next Payment Due: ${nextPaymentDate}</li>
-    </ul>
-    <p>Thank you for your timely payment!</p>
-    <p>Best regards,<br>Smart Fund Team</p>
-  `;
-  
-  await this.sendDualNotification(borrowerId, 'payment_confirmed', message, null, emailSubject, emailHtml);
-};
-
-// Send late payment notification
-exports.sendLatePaymentNotification = async (borrowerId, loanId, amount, penalty) => {
-  const details = await getLoanDetails(loanId);
-  const message = `URGENT: $${penalty} late fee applied to ${details.loanType} (${details.term} months). Pay now to avoid penalties.`;
-  const emailSubject = 'URGENT: Late Payment Fee Applied';
-  const emailHtml = `
-    <p>Hello,</p>
-    <p>Your payment is overdue and a late fee has been applied:</p>
-    <ul>
-      <li>Loan Type: ${details.loanType}</li>
-      <li>Original Amount: $${amount}</li>
-      <li>Late Fee: $${penalty}</li>
-      <li>Total Due: $${amount + penalty}</li>
-    </ul>
-    <p>Please make your payment immediately to avoid additional penalties.</p>
-    <p>Best regards,<br>Smart Fund Team</p>
-  `;
-  
-  await this.sendDualNotification(borrowerId, 'late_payment', message, null, emailSubject, emailHtml);
-};
-
-// ============================================================================
-// STEP 7: Loan Completion
-// ============================================================================
-
-// Notify borrower when loan is completed
-exports.sendLoanCompletionNotification = async (borrowerId, loanId) => {
-  const details = await getLoanDetails(loanId);
-  const message = `Congratulations! Your ${details.loanType} (${details.term} months) is fully paid. Thank you!`;
-  const emailSubject = 'Congratulations! Loan Fully Paid';
-  const emailHtml = `
-    <p>Congratulations!</p>
-    <p>You have successfully completed your loan!</p>
-    <ul>
-      <li>Loan Type: ${details.loanType}</li>
-      <li>Amount: $${details.amount}</li>
-      <li>Term: ${details.term} months</li>
-    </ul>
-    <p>Thank you for choosing Smart Fund for your financial needs.</p>
-    <p>Best regards,<br>Smart Fund Team</p>
-  `;
-  
-  await this.sendDualNotification(borrowerId, 'loan_completed', message, null, emailSubject, emailHtml);
-};
-
-// Notify sponsors when loan is completed
-exports.sendSponsorCompletionNotification = async (sponsorId, borrowerId, loanId) => {
-  const details = await getLoanDetails(loanId);
-  const borrower = await User.findById(borrowerId);
-  const message = `🎉 You've helped ${borrower.userFirstName} ${borrower.userLastName} complete their ${details.loanType} (${details.term} months)!`;
-  const emailSubject = '🎉 Loan Successfully Completed!';
-  const emailHtml = `
-    <p>Hello,</p>
-    <p>Congratulations! You have successfully helped ${borrower.userFirstName} ${borrower.userLastName} complete their loan!</p>
-    <ul>
-      <li>Borrower: ${borrower.userFirstName} ${borrower.userLastName}</li>
-      <li>Loan Type: ${details.loanType}</li>
-      <li>Amount: $${details.amount}</li>
-      <li>Term: ${details.term} months</li>
-    </ul>
-    <p>Thank you for your sponsorship and support!</p>
-    <p>Best regards,<br>Smart Fund Team</p>
-  `;
-  
-  await this.sendDualNotification(sponsorId, 'sponsorship_completed', message, null, emailSubject, emailHtml);
-};
-
-// Notify admin when loan is completed
-exports.sendAdminCompletionNotification = async (loanId, borrowerId) => {
-  const details = await getLoanDetails(loanId);
-  const borrower = await User.findById(borrowerId);
-  const message = `Loan Completed: ${details.loanType} (${details.term} months) for ${borrower.userFirstName} ${borrower.userLastName}`;
-  const emailSubject = 'Loan Successfully Completed';
-  const emailHtml = `
-    <p>Hello Admin,</p>
-    <p>A loan has been successfully completed:</p>
-    <ul>
-      <li>Borrower: ${borrower.userFirstName} ${borrower.userLastName}</li>
-      <li>Loan Type: ${details.loanType}</li>
-      <li>Amount: $${details.amount}</li>
-      <li>Term: ${details.term} months</li>
-    </ul>
-    <p>Best regards,<br>Smart Fund Team</p>
-  `;
-  
-  // Get all admin users
-  const admins = await User.find({ role: 'admin' });
-  for (const admin of admins) {
-    await this.sendDualNotification(admin._id, 'loan_completed_admin', message, null, emailSubject, emailHtml);
-  }
-};
-
-// ============================================================================
-// LEGACY FUNCTIONS (Maintained for backward compatibility)
-// ============================================================================
-
-// Send sponsor request (both in-app and email)
+// Legacy functions preserved (aliases)
 exports.sendSponsorRequest = async (sponsor, borrower, loanDetails) => {
   const message = `${borrower.userFirstName} ${borrower.userLastName} has requested you to sponsor their ${loanDetails.type} loan for $${loanDetails.amount}`;
   const emailSubject = 'Loan Guarantee Request';
@@ -604,207 +122,33 @@ exports.sendSponsorRequest = async (sponsor, borrower, loanDetails) => {
     <p>Please log in to the platform to accept or decline this request.</p>
     <p>Best regards,<br>Smart Fund Team</p>
   `;
-  
-  await this.sendDualNotification(sponsor._id, 'sponsor_request', message, null, emailSubject, emailHtml);
+  await exports.sendDualNotification(sponsor._id, 'sponsor_request', message, null, emailSubject, emailHtml);
 };
 
-// Send sponsor approval notification
-exports.sendSponsorApprovalNotification = async (sponsorId, contractId, isFirstApproval = false) => {
-  const details = await getContractDetails(contractId);
-  const message = isFirstApproval 
-    ? `You have approved the contract request for a ${details.loanType || ''} loan of $${details.amount || ''}.`
-    : `Your co-sponsor has approved the contract for a ${details.loanType || ''} loan of $${details.amount || ''}. Waiting for your approval.`;
-
-  const emailSubject = isFirstApproval ? 'Contract Approval Confirmation' : 'Co-Sponsor Approval Notification';
-  const emailHtml = `
-    <p>Hello,</p>
-    <p>${message}</p>
-    <p>Please log in to the platform to view the contract details.</p>
-    <p>Best regards,<br>Smart Fund Team</p>
-  `;
-
-  await this.sendDualNotification(sponsorId, 'sponsor_approved', message, contractId, emailSubject, emailHtml);
-};
-
-// Send contract rejection notification
-exports.sendContractRejectionNotification = async (userId, contractId, reason, isSponsor = false) => {
-  const details = await getContractDetails(contractId);
-  const message = isSponsor 
-    ? `You have rejected the contract request for a ${details.loanType || ''} loan of $${details.amount || ''}.`
-    : `Your contract for a ${details.loanType || ''} loan of $${details.amount || ''} has been rejected by a sponsor: ${reason}`;
-
-  const emailSubject = 'Contract Rejection Notification';
-  const emailHtml = `
-    <p>Hello,</p>
-    <p>${message}</p>
-    <p>Please log in to the platform for more details.</p>
-    <p>Best regards,<br>Smart Fund Team</p>
-  `;
-
-  await this.sendDualNotification(userId, 'contract_rejected', message, contractId, emailSubject, emailHtml);
-};
-
-// Send contract approval notification
-exports.sendContractApprovalNotification = async (userId, contractId) => {
-  const details = await getContractDetails(contractId);
-  const message = `Your contract for a ${details.loanType || ''} loan of $${details.amount || ''} has been approved!`;
-  const emailSubject = 'Contract Approved!';
-  const emailHtml = `
-    <p>Congratulations!</p>
-    <p>${message}</p>
-    <p>Please log in to the platform to view your loan details and payment schedule.</p>
-    <p>Best regards,<br>Smart Fund Team</p>
-  `;
-
-  await this.sendDualNotification(userId, 'contract_approved', message, contractId, emailSubject, emailHtml);
-};
-
-// Send contract processing notification
 exports.sendContractProcessingNotification = async (userId, contractId) => {
-  const details = await getContractDetails(contractId);
+  const details = await contracts.getContractDetails(contractId);
   const message = `Both sponsors have approved your contract for a ${details.loanType || ''} loan of $${details.amount || ''}. It is now being processed.`;
-  const emailSubject = 'Contract Processing';
-  const emailHtml = `
-    <p>Hello,</p>
-    <p>${message}</p>
-    <p>You will receive another notification once the processing is complete.</p>
-    <p>Best regards,<br>Smart Fund Team</p>
-  `;
-
-  await this.sendDualNotification(userId, 'contract_processing', message, contractId, emailSubject, emailHtml);
+  await createInAppNotification(userId, 'contract_processing', message, contractId);
 };
 
-// Send partial approval notification
 exports.sendPartialApprovalNotification = async (userId, contractId) => {
-  const details = await getContractDetails(contractId);
+  const details = await contracts.getContractDetails(contractId);
   const message = `One sponsor has approved your contract for a ${details.loanType || ''} loan of $${details.amount || ''}. Waiting for the second sponsor's approval.`;
-  const emailSubject = 'Partial Contract Approval';
-  const emailHtml = `
-    <p>Hello,</p>
-    <p>${message}</p>
-    <p>You will be notified once both sponsors have made their decision.</p>
-    <p>Best regards,<br>Smart Fund Team</p>
-  `;
-
-  await this.sendDualNotification(userId, 'partial_approval', message, contractId, emailSubject, emailHtml);
+  await createInAppNotification(userId, 'partial_approval', message, contractId);
 };
 
-// Send payment reminder
-exports.sendPaymentReminder = async (payment, user) => {
-  const message = `Your payment of $${Math.round(payment.amount)} is due on ${payment.dueDate.toDateString()}`;
-  const emailSubject = 'Payment Due Reminder';
-  const emailHtml = `
-    <p>Hello ${user.userFirstName},</p>
-    <p>${message}</p>
-    <p>Please make your payment on time to avoid late fees.</p>
-    <p>Best regards,<br>Smart Fund Team</p>
-  `;
-  
-  await this.sendDualNotification(user._id, 'payment_reminder', message, null, emailSubject, emailHtml);
-};
-
-// Send document rejection notification
-exports.sendDocumentRejection = async (user, documentId, reason) => {
-  const message = `Your document (ID: ${documentId}) has been rejected. Reason: ${reason}`;
-  const emailSubject = 'Document Rejection Notice';
-  const emailHtml = `
-    <p>Hello ${user.userFirstName},</p>
-    <p>Your document (ID: ${documentId}) has been rejected.</p>
-    <p><strong>Reason:</strong> ${reason}</p>
-    <p>Please review the requirements and re-upload the document.</p>
-    <p>Best regards,<br>Smart Fund Team</p>
-  `;
-  
-  await this.sendDualNotification(user._id, 'document_rejected', message, null, emailSubject, emailHtml);
-};
-
-// Send document pending review notification to admin
-exports.sendDocumentPendingReview = async (documentId) => {
-  try {
-    // Get all admin users
-    const admins = await User.find({ role: 'admin' });
-    
-    const message = `New document uploaded and pending review (ID: ${documentId})`;
-    const emailSubject = 'Document Pending Review';
-    const emailHtml = `
-      <p>Hello Admin,</p>
-      <p>A new document has been uploaded and is pending your review.</p>
-      <p><strong>Document ID:</strong> ${documentId}</p>
-      <p>Please log in to the admin panel to review this document.</p>
-      <p>Best regards,<br>Smart Fund Team</p>
-    `;
-    
-    // Send notification to all admins
-    for (const admin of admins) {
-      await this.sendDualNotification(admin._id, 'document_pending_review', message, null, emailSubject, emailHtml);
-    }
-    
-    console.log(`Document pending review notification sent to ${admins.length} admins`);
-  } catch (error) {
-    console.error('Error sending document pending review notification:', error);
-  }
-};
-
-// Send document approval notification to user
-exports.sendDocumentApprovalNotification = async (userId, documentId, documentName) => {
-  const message = `Your document "${documentName}" has been approved by admin`;
-  const emailSubject = 'Document Approved';
-  const emailHtml = `
-    <p>Hello,</p>
-    <p>Your document "${documentName}" has been approved by our admin team.</p>
-    <p>Your contract will now proceed to the next stage of processing.</p>
-    <p>Best regards,<br>Smart Fund Team</p>
-  `;
-  
-  await this.sendDualNotification(userId, 'document_approved', message, null, emailSubject, emailHtml);
-};
-
-// Send document rejection notification to user
-exports.sendDocumentRejectionNotification = async (userId, documentId, documentName, rejectionReason) => {
-  const message = `Your document "${documentName}" has been rejected. Reason: ${rejectionReason}`;
-  const emailSubject = 'Document Rejected';
-  const emailHtml = `
-    <p>Hello,</p>
-    <p>Your document "${documentName}" has been rejected by our admin team.</p>
-    <p><strong>Reason:</strong> ${rejectionReason}</p>
-    <p>Please review the requirements and re-upload the document.</p>
-    <p>Best regards,<br>Smart Fund Team</p>
-  `;
-  
-  await this.sendDualNotification(userId, 'document_rejected', message, null, emailSubject, emailHtml);
-};
-
-// Send contract document completion notification
-exports.sendContractDocumentCompletionNotification = async (userId, contractId) => {
-  const details = await getContractDetails(contractId);
-  const message = 'All documents for your contract have been approved. Contract is now being processed.';
-  const emailSubject = 'Documents Approved - Contract Processing';
-  const emailHtml = `
-    <p>Hello,</p>
-    <p>${message}</p>
-    <p>Your contract will now proceed to sponsor approval stage.</p>
-    <p>Best regards,<br>Smart Fund Team</p>
-  `;
-  
-  await this.sendDualNotification(userId, 'documents_completed', message, contractId, emailSubject, emailHtml);
-};
-
-// Send contract update notification (legacy function for backward compatibility)
 exports.sendContractUpdate = async (userId, contractId, status, details = '') => {
   try {
     const user = await User.findById(userId);
     if (!user) return;
-
     const statusMessages = {
       'approved': 'Your contract has been approved!',
       'rejected': 'Your contract has been rejected.',
       'processing': 'Your contract is being processed.',
       'completed': 'Your contract has been completed.'
     };
-
     const message = `${statusMessages[status] || 'Your contract status has been updated.'} ${details}`;
-    
-    await this.createNotification(userId, 'contract_update', message, contractId);
+    await createInAppNotification(userId, 'contract_update', message, contractId);
   } catch (error) {
     console.error('Error sending contract update notification:', error);
   }
