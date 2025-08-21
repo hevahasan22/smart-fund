@@ -36,6 +36,18 @@ exports.markAsRead = async (req, res) => {
   }
 };
 
+exports.markAllAsRead = async (req, res) => {
+  try {
+    await User.updateOne(
+      { _id: req.user._id },
+      { $set: { 'notifications.$[].isRead': true } }
+    );
+    res.json({ message: 'All notifications marked as read' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to mark all as read' });
+  }
+};
+
 exports.clearAll = async (req, res) => {
   try {
     await User.updateOne({ _id: req.user._id }, { $set: { notifications: [] } });
