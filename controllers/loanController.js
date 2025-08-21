@@ -209,8 +209,9 @@ exports.getLoanById = async (req, res) => {
       }
     }
     
-    // Add calculated fields, contract, and sponsors to response
+    
     const loanWithSummary = {
+      _id: loan._id, 
       loan: {
         loanAmount: loan.loanAmount,
         loanTermMonths: loan.loanTermMonths,
