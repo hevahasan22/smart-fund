@@ -12,6 +12,9 @@ router.put('/users/:userId/reactivate', authenticate, requireAdmin, adminControl
 // Contract Management
 router.get('/contracts/:contractId/review', authenticate, requireAdmin, adminController.reviewContract);
 router.put('/contracts/:contractId/status', authenticate, requireAdmin, adminController.updateContractStatus);
+router.get('/contracts/pending-documents', authenticate, requireAdmin, adminController.getContractsWithPendingDocuments);
+router.get('/contracts/pending-documents/count', authenticate, requireAdmin, adminController.getContractsWithPendingDocumentsCount);
+router.get('/contracts/:contractId/pending-documents', authenticate, requireAdmin, adminController.getPendingDocumentsForContract);
 
 // Investor Management
 router.post('/investors', authenticate, requireAdmin, adminController.addInvestor);

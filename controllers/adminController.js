@@ -201,6 +201,206 @@ exports.updateContractStatus = async (req, res) => {
   }
 };
 
+// Get contracts with pending document approval status
+exports.getContractsWithPendingDocuments = async (req, res) => {
+  try {
+    const { page = 1, limit = 20, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
+    
+    console.log(`Getting contracts with pending documents - Page: ${page}, Limit: ${limit}`);
+    
+    // Find contracts with pending document approval status
+    const contracts = await Contract.find({
+      status: 'pending_document_approval'
+    })
+    .populate('userID', 'userFirstName userLastName email')
+    .populate('sponsorID_1', 'userFirstName userLastName email')
+    .populate('sponsorID_2', 'userFirstName userLastName email')
+    .populate({
+      path: 'typeTermID',
+      populate: [
+        { path: 'loanTypeID', select: 'loanName' },
+        { path: 'loanTermID', select: 'type' }
+      ]
+    })
+    .sort({ [sortBy]: sortOrder === 'desc' ? -1 : 1 })
+    .limit(parseInt(limit))
+    .skip((parseInt(page) - 1) * parseInt(limit));
+    
+    const total = await Contract.countDocuments({
+      status: 'pending_document_approval'
+    });
+    
+    // Get basic contract information with pending document count
+    const contractsWithBasicInfo = await Promise.all(contracts.map(async (contract) => {
+      // Get pending documents count for this contract
+      const pendingDocumentsCount = await additionalDocumentModel.countDocuments({
+        contractID: contract._id,
+        status: 'pending'
+      });
+      
+      return {
+        id: contract._id,
+        status: contract.status,
+        createdAt: contract.createdAt,
+        borrower: {
+          firstName: contract.userID.userFirstName,
+          lastName: contract.userID.userLastName,
+          email: contract.userID.email
+        },
+        loanDetails: {
+          type: contract.typeTermID.loanTypeID.loanName,
+          term: contract.typeTermID.loanTermID.type,
+          amount: contract.tempLoanAmount,
+          termMonths: contract.tempLoanTermMonths
+        },
+        pendingDocumentsCount
+      };
+    }));
+    
+    console.log(`Found ${contracts.length} contracts with pending documents out of ${total} total`);
+    
+    res.json({
+      success: true,
+      contracts: contractsWithBasicInfo,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (error) {
+    console.error('Error getting contracts with pending documents:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Error fetching contracts with pending documents', 
+      details: error.message 
+    });
+  }
+};
+
+// Get count of contracts with pending document approval status
+exports.getContractsWithPendingDocumentsCount = async (req, res) => {
+  try {
+    console.log('Getting count of contracts with pending documents');
+    
+    const [pendingDocumentApproval, totalPendingDocuments] = await Promise.all([
+      Contract.countDocuments({ status: 'pending_document_approval' }),
+      Contract.countDocuments({ status: 'pending_document_approval' })
+    ]);
+    
+    // Get additional statistics
+    const [totalContracts, totalDocuments, pendingDocuments] = await Promise.all([
+      Contract.countDocuments({}),
+      additionalDocumentModel.countDocuments({}),
+      additionalDocumentModel.countDocuments({ status: 'pending' })
+    ]);
+    
+    console.log(`Found ${totalPendingDocuments} contracts with pending documents`);
+    
+    res.json({
+      success: true,
+      counts: {
+        pendingDocumentApproval,
+        totalPendingDocuments
+      },
+      additionalStats: {
+        totalContracts,
+        totalDocuments,
+        pendingDocuments
+      },
+      percentages: {
+        pendingDocumentApprovalPercentage: totalContracts > 0 ? Math.round((pendingDocumentApproval / totalContracts) * 100) : 0,
+        pendingDocumentsPercentage: totalDocuments > 0 ? Math.round((pendingDocuments / totalDocuments) * 100) : 0
+      }
+    });
+  } catch (error) {
+    console.error('Error getting contracts with pending documents count:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Error fetching contracts with pending documents count', 
+      details: error.message 
+    });
+  }
+};
+
+// Get pending documents for a specific contract
+exports.getPendingDocumentsForContract = async (req, res) => {
+  try {
+    const { contractId } = req.params;
+    const { page = 1, limit = 20, sortBy = 'uploadedAt', sortOrder = 'desc' } = req.query;
+    
+    console.log(`Getting pending documents for contract ${contractId} - Page: ${page}, Limit: ${limit}`);
+    
+    // First, verify the contract exists and is in pending_document_approval status
+    const contract = await Contract.findById(contractId)
+      .populate('userID', 'userFirstName userLastName email');
+    
+    if (!contract) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'Contract not found' 
+      });
+    }
+    
+    if (contract.status !== 'pending_document_approval') {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Contract is not in pending document approval status',
+        currentStatus: contract.status
+      });
+    }
+    
+    // Get only pending documents for this contract
+    const pendingDocuments = await additionalDocumentModel.find({ 
+      contractID: contractId,
+      status: 'pending'
+    })
+      .populate('typeID')
+      .sort({ [sortBy]: sortOrder === 'desc' ? -1 : 1 })
+      .limit(parseInt(limit))
+      .skip((parseInt(page) - 1) * parseInt(limit));
+    
+    const total = await additionalDocumentModel.countDocuments({ 
+      contractID: contractId,
+      status: 'pending'
+    });
+    
+    console.log(`Found ${pendingDocuments.length} pending documents for contract ${contractId}`);
+    
+    res.json({
+      success: true,
+      contract: {
+        id: contract._id,
+        borrower: {
+          firstName: contract.userID.userFirstName,
+          lastName: contract.userID.userLastName,
+          email: contract.userID.email
+        }
+      },
+      pendingDocuments: pendingDocuments.map(doc => ({
+        id: doc._id,
+        type: doc.typeID.documentName,
+        documentFile: doc.documentFile,
+        uploadedAt: doc.uploadedAt
+      })),
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (error) {
+    console.error('Error getting pending documents for contract:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Error fetching pending documents for contract', 
+      details: error.message 
+    });
+  }
+};
+
 // Add new investor
 exports.addInvestor = async (req, res) => {
   try {
