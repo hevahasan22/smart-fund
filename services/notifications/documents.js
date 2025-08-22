@@ -48,7 +48,7 @@ async function sendDocumentPendingReview(documentId) {
 
 async function sendContractDocumentCompletionNotification(userId, contractId) {
   const details = await getContractDetails(contractId);
-  const message = 'All documents for your contract have been approved. Contract is now being processed.';
+  const message = 'All documents for your contract have been approved. Contract is wainting for sponsors approval.';
   const emailSubject = 'Documents Approved - Contract Processing';
   const emailHtml = `
     <p>Hello,</p>

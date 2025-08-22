@@ -13,7 +13,10 @@ exports.createNotification = createInAppNotification;
 
 exports.sendDualNotification = async (userId, type, message, contractId = null, emailSubject = null, emailHtml = null) => {
   try {
-    await createInAppNotification(userId, type, message, contractId);
+    // Do not create in-app entries for sponsorship request types
+    if (type !== 'sponsorship_request' && type !== 'sponsor_request') {
+      await createInAppNotification(userId, type, message, contractId);
+    }
     if (emailSubject && emailHtml) {
       // Lazy import to avoid circular
       const { sendEmail } = require('./notifications/helpers');
@@ -25,6 +28,8 @@ exports.sendDualNotification = async (userId, type, message, contractId = null, 
 };
 
 exports.sendInAppOnly = async (userId, type, message, contractId = null) => {
+  // Skip in-app for sponsorship request types
+  if (type === 'sponsorship_request' || type === 'sponsor_request') return;
   await createInAppNotification(userId, type, message, contractId);
 };
 
@@ -42,7 +47,9 @@ exports.markNotificationAsRead = async (userId, notificationId) => {
 exports.getUserNotifications = async (userId, limit = 50) => {
   try {
     const user = await User.findById(userId).select('notifications');
-    return user.notifications
+    const excluded = new Set(['sponsorship_request', 'sponsor_request']);
+    return (user.notifications || [])
+      .filter(n => !excluded.has(n.type))
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
       .slice(0, limit);
   } catch (error) {
@@ -54,7 +61,8 @@ exports.getUserNotifications = async (userId, limit = 50) => {
 exports.getUnreadNotificationCount = async (userId) => {
   try {
     const user = await User.findById(userId).select('notifications');
-    return user.notifications.filter(n => !n.isRead).length;
+    const excluded = new Set(['sponsorship_request', 'sponsor_request']);
+    return (user.notifications || []).filter(n => !n.isRead && !excluded.has(n.type)).length;
   } catch (error) {
     console.error('Error getting unread notification count:', error);
     return 0;
@@ -65,7 +73,8 @@ exports.getUnreadNotificationCount = async (userId) => {
 exports.checkPendingActions = async (userId) => {
   try {
     const user = await User.findById(userId);
-    const unreadCount = user.notifications.filter(n => !n.isRead).length;
+    const excluded = new Set(['sponsorship_request', 'sponsor_request']);
+    const unreadCount = (user.notifications || []).filter(n => !n.isRead && !excluded.has(n.type)).length;
     const pendingApprovals = user.pendingApprovals ? user.pendingApprovals.length : 0;
     return {
       hasPendingActions: unreadCount > 0 || pendingApprovals > 0,
@@ -122,7 +131,9 @@ exports.sendSponsorRequest = async (sponsor, borrower, loanDetails) => {
     <p>Please log in to the platform to accept or decline this request.</p>
     <p>Best regards,<br>Smart Fund Team</p>
   `;
-  await exports.sendDualNotification(sponsor._id, 'sponsor_request', message, null, emailSubject, emailHtml);
+  // Send only email; do not create in-app sponsorship notification
+  const { sendEmail } = require('./notifications/helpers');
+  await sendEmail(sponsor._id, emailSubject, emailHtml);
 };
 
 exports.sendContractProcessingNotification = async (userId, contractId) => {

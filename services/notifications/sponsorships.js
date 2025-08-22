@@ -18,7 +18,7 @@ async function sendSponsorshipRequestNotification(sponsorId, borrowerId, contrac
     <p>Please log in to the platform to accept or decline this sponsorship request.</p>
     <p>Best regards,<br>Smart Fund Team</p>
   `;
-  await createInAppNotification(sponsorId, 'sponsorship_request', message, contractId);
+  // Stop adding sponsorship requests to generic notifications; only send email
   await sendEmail(sponsorId, emailSubject, emailHtml);
 }
 
