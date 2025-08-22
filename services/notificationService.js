@@ -7,6 +7,7 @@ const documents = require('./notifications/documents');
 const sponsorships = require('./notifications/sponsorships');
 const payments = require('./notifications/payments');
 const { createInAppNotification } = require('./notifications/helpers');
+const { Contract } = require('../models/contract');
 
 // Backward compatible core helpers
 exports.createNotification = createInAppNotification;
@@ -138,7 +139,24 @@ exports.sendSponsorRequest = async (sponsor, borrower, loanDetails) => {
 
 exports.sendContractProcessingNotification = async (userId, contractId) => {
   const details = await contracts.getContractDetails(contractId);
-  const message = `Both sponsors have approved your contract for a ${details.loanType || ''} loan of $${details.amount || ''}. It is now being processed.`;
+  // Fetch sponsor names
+  let sponsorNames = '';
+  try {
+    const contract = await Contract.findById(contractId).select('sponsorID_1 sponsorID_2');
+    if (contract) {
+      const [s1, s2] = await Promise.all([
+        User.findById(contract.sponsorID_1).select('userFirstName userLastName'),
+        User.findById(contract.sponsorID_2).select('userFirstName userLastName')
+      ]);
+      const name1 = s1 ? `${s1.userFirstName} ${s1.userLastName}` : 'Sponsor 1';
+      const name2 = s2 ? `${s2.userFirstName} ${s2.userLastName}` : 'Sponsor 2';
+      sponsorNames = ` (${name1}, ${name2})`;
+    }
+  } catch (e) {
+    // Fallback silently if name fetch fails
+    sponsorNames = '';
+  }
+  const message = `Both sponsors${sponsorNames} have approved your contract for a ${details.loanType || ''} loan of $${details.amount || ''}. It is now being processed.`;
   await createInAppNotification(userId, 'contract_processing', message, contractId);
 };
 

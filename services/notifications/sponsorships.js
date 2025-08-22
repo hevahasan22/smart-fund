@@ -1,6 +1,7 @@
 const { User } = require('../../models/user');
 const { createInAppNotification, sendEmail } = require('./helpers');
 const { getContractDetails } = require('./contracts');
+const { Contract } = require('../../models/contract');
 
 async function sendSponsorshipRequestNotification(sponsorId, borrowerId, contractId) {
   const details = await getContractDetails(contractId);
@@ -24,8 +25,28 @@ async function sendSponsorshipRequestNotification(sponsorId, borrowerId, contrac
 
 async function sendSponsorApprovalNotification(borrowerId, contractId, sponsorName, remainingSponsors) {
   const details = await getContractDetails(contractId);
-  const message = `${sponsorName} approved your ${details.loanType} (${details.term} months)! Waiting on ${remainingSponsors} more sponsors.`;
-  await createInAppNotification(borrowerId, 'sponsor_approved', message, contractId);
+
+  // If this was the second approval (remaining = 0), include both sponsors' names
+  if (remainingSponsors === 0) {
+    const contract = await Contract.findById(contractId).select('sponsorID_1 sponsorID_2');
+    let sponsor1Name = 'First Sponsor';
+    let sponsor2Name = 'Second Sponsor';
+    if (contract) {
+      const [s1, s2] = await Promise.all([
+        User.findById(contract.sponsorID_1).select('userFirstName userLastName'),
+        User.findById(contract.sponsorID_2).select('userFirstName userLastName')
+      ]);
+      if (s1) sponsor1Name = `${s1.userFirstName} ${s1.userLastName}`;
+      if (s2) sponsor2Name = `${s2.userFirstName} ${s2.userLastName}`;
+    }
+    const message = `${sponsor1Name} and ${sponsor2Name} approved your ${details.loanType} loan of $${details.amount} (${details.term} months). Your contract is now processing.`;
+    await createInAppNotification(borrowerId, 'sponsor_approved', message, contractId);
+    return;
+  }
+
+  // Otherwise, first approval: include the approving sponsor's name
+  const partialMessage = `${sponsorName} approved your ${details.loanType} loan of $${details.amount} (${details.term} months). Waiting for 1 more sponsor.`;
+  await createInAppNotification(borrowerId, 'sponsor_approved', partialMessage, contractId);
 }
 
 async function sendSponsorReminderNotification(sponsorId, borrowerId, contractId, approvedCount, totalCount) {

@@ -456,8 +456,6 @@ exports.approveContractAsSponsor = async (req, res) => {
       const totalCount = 2;
       await notificationService.sendSponsorReminderNotification(otherSponsorId, contract.userID, contract._id, approvedCount, totalCount);
       
-      // Notify borrower about partial approval
-      await notificationService.sendPartialApprovalNotification(contract.userID, contract._id);
     }
     
     res.json({ 
