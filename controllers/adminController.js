@@ -248,6 +248,7 @@ exports.getContractsWithPendingDocuments = async (req, res) => {
           email: contract.userID.email
         },
         loanDetails: {
+          typeTermName: contract.typeTermID.name,
           type: contract.typeTermID.loanTypeID.loanName,
           term: contract.typeTermID.loanTermID.type,
           amount: contract.tempLoanAmount,
@@ -1149,5 +1150,132 @@ exports.deleteDocumentType = async (req, res) => {
   } catch (error) {
     console.error('Error deleting document type:', error);
     res.status(500).json({ error: error.message });
+  }
+};
+
+// Admin: Get comprehensive dashboard statistics
+exports.getDashboardStats = async (req, res) => {
+  try {
+    console.log('Getting comprehensive dashboard statistics');
+    
+    // Get basic counts
+    const [totalUsers, totalContracts, approvedContracts, rejectedContracts] = await Promise.all([
+      User.countDocuments({ status: { $ne: 'inactive' } }),
+      Contract.countDocuments({}),
+      Contract.countDocuments({ status: { $in: ['approved', 'active'] } }),
+      Contract.countDocuments({ status: 'rejected' })
+    ]);
+    
+    // Get loan type statistics
+    const contractsWithLoanTypes = await Contract.find({})
+      .populate({
+        path: 'typeTermID',
+        populate: {
+          path: 'loanTypeID',
+          select: 'loanName'
+        }
+      })
+      .lean();
+    
+    // Calculate loan type percentages
+    const loanTypeStats = {};
+    let totalContractsWithLoanTypes = 0;
+    
+    contractsWithLoanTypes.forEach(contract => {
+      if (contract.typeTermID && contract.typeTermID.loanTypeID) {
+        const loanTypeName = contract.typeTermID.loanTypeID.loanName;
+        if (!loanTypeStats[loanTypeName]) {
+          loanTypeStats[loanTypeName] = {
+            count: 0,
+            percentage: 0
+          };
+        }
+        loanTypeStats[loanTypeName].count++;
+        totalContractsWithLoanTypes++;
+      }
+    });
+    
+    // Calculate percentages
+    Object.keys(loanTypeStats).forEach(loanType => {
+      loanTypeStats[loanType].percentage = totalContractsWithLoanTypes > 0 
+        ? Math.round((loanTypeStats[loanType].count / totalContractsWithLoanTypes) * 100) 
+        : 0;
+    });
+    
+    // Get additional statistics
+    const [pendingContracts, activeContracts, completedContracts] = await Promise.all([
+      Contract.countDocuments({ 
+        status: { 
+          $in: ['pending', 'pending_sponsor_approval', 'pending_document_approval', 'pending_processing', 'pending_document_upload'] 
+        } 
+      }),
+      Contract.countDocuments({ status: 'active' }),
+      Contract.countDocuments({ status: 'completed' })
+    ]);
+    
+    // Get recent activity (last 30 days)
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    
+    const [recentUsers, recentContracts, recentApprovals, recentRejections] = await Promise.all([
+      User.countDocuments({ 
+        createdAt: { $gte: thirtyDaysAgo },
+        status: { $ne: 'inactive' }
+      }),
+      Contract.countDocuments({ createdAt: { $gte: thirtyDaysAgo } }),
+      Contract.countDocuments({ 
+        status: { $in: ['approved', 'active'] },
+        approvedAt: { $gte: thirtyDaysAgo }
+      }),
+      Contract.countDocuments({ 
+        status: 'rejected',
+        updatedAt: { $gte: thirtyDaysAgo }
+      })
+    ]);
+    
+    console.log(`Dashboard stats calculated - Users: ${totalUsers}, Contracts: ${totalContracts}, Approved: ${approvedContracts}, Rejected: ${rejectedContracts}`);
+    
+    res.json({
+      success: true,
+      statistics: {
+        users: {
+          total: totalUsers,
+          recent: recentUsers
+        },
+        contracts: {
+          total: totalContracts,
+          approved: approvedContracts,
+          rejected: rejectedContracts,
+          pending: pendingContracts,
+          active: activeContracts,
+          completed: completedContracts,
+          recent: recentContracts
+        },
+        loans: {
+          total: approvedContracts + activeContracts, // Total approved loans
+          recent: recentApprovals
+        },
+        recentActivity: {
+          approvals: recentApprovals,
+          rejections: recentRejections
+        }
+      },
+      loanTypeDistribution: {
+        totalContracts: totalContractsWithLoanTypes,
+        types: loanTypeStats
+      },
+      percentages: {
+        approvalRate: totalContracts > 0 ? Math.round((approvedContracts / totalContracts) * 100) : 0,
+        rejectionRate: totalContracts > 0 ? Math.round((rejectedContracts / totalContracts) * 100) : 0,
+        pendingRate: totalContracts > 0 ? Math.round((pendingContracts / totalContracts) * 100) : 0
+      }
+    });
+  } catch (error) {
+    console.error('Error getting dashboard statistics:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Error fetching dashboard statistics', 
+      details: error.message 
+    });
   }
 };

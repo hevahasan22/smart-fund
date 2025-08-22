@@ -42,4 +42,7 @@ router.post('/document-types', authenticate, requireAdmin, adminController.creat
 router.put('/document-types/:id', authenticate, requireAdmin, adminController.updateDocumentType);
 router.delete('/document-types/:id', authenticate, requireAdmin, adminController.deleteDocumentType);
 
+// Dashboard Statistics
+router.get('/dashboard/stats', authenticate, requireAdmin, adminController.getDashboardStats);
+
 module.exports = router;
