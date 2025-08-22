@@ -185,7 +185,7 @@ exports.getLoanById = async (req, res) => {
     }
 
     // Calculate loan summary
-    const totalAmount = loan.loanAmount;
+    const totalAmount = Math.round(payments.reduce((sum, payment) => sum + payment.amount, 0));
     const paidAmount = Math.round(payments.reduce((sum, payment) => 
       payment.status === 'paid' ? sum + payment.amount : sum, 0));
     const remainingAmount = Math.round(totalAmount - paidAmount);
@@ -304,7 +304,7 @@ exports.getLatestLoanForUser = async (req, res) => {
     const payments = await Payment.find({ loanID: loan._id }).sort({ dueDate: 1 });
 
     // Calculate summary
-    const totalAmount = loan.loanAmount;
+    const totalAmount = Math.round(payments.reduce((sum, payment) => sum + payment.amount, 0));
     const paidAmount = Math.round(payments.reduce((sum, payment) => payment.status === 'paid' ? sum + payment.amount : sum, 0));
     const remainingAmount = Math.round(totalAmount - paidAmount);
 
