@@ -276,19 +276,43 @@ exports.getUser = async (req, res) => {
 exports.updateUser = async (req, res) => {
   // Use the authenticated user's ID from the token
   const userId = req.user._id;
+  
+  console.log('Update user request:', {
+    userId: userId,
+    body: req.body,
+    hasFile: !!req.file
+  });
+  
   // Validate input (excluding file)
   const { error } = ValidateUpdateUser(req.body);
   if (error) {
     return res.status(400).json({ success: false, message: error.details[0].message });
   }
+  
   try {
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
+    
+    // Check for email uniqueness if email is being updated
+    if (req.body.email && req.body.email !== user.email) {
+      const existingUser = await User.findOne({ email: req.body.email });
+      if (existingUser) {
+        return res.status(400).json({ success: false, message: 'Email already exists' });
+      }
+    }
+    
+    // Check for creditID uniqueness if creditID is being updated
+    if (req.body.creditID && req.body.creditID !== user.creditID) {
+      const existingUser = await User.findOne({ creditID: req.body.creditID });
+      if (existingUser) {
+        return res.status(400).json({ success: false, message: 'Credit ID already exists' });
+      }
+    }
     // Update allowed fields
     const allowedFields = [
-      'userFirstName', 'userLastName', 'email', 'password', 'phoneNumber', 'DateOfBirth',
+      'userFirstName', 'userLastName', 'email', 'phoneNumber', 'DateOfBirth',
       'address', 'creditID', 'gender', 'employmentStatus', 'income', 'profilePhoto'
     ];
     allowedFields.forEach(field => {
@@ -296,25 +320,67 @@ exports.updateUser = async (req, res) => {
         user[field] = req.body[field];
       }
     });
+    
+    // Handle password update separately to hash it
+    if (req.body.password !== undefined) {
+      const saltRounds = 12;
+      user.password = await bcrypt.hash(req.body.password, saltRounds);
+    }
+    
+    // Handle DateOfBirth conversion if it's a string
+    if (req.body.DateOfBirth !== undefined) {
+      if (typeof req.body.DateOfBirth === 'string') {
+        user.DateOfBirth = new Date(req.body.DateOfBirth);
+      } else {
+        user.DateOfBirth = req.body.DateOfBirth;
+      }
+    }
+    
+    // Handle gender case conversion - normalize to lowercase
+    if (req.body.gender !== undefined) {
+      user.gender = req.body.gender.toLowerCase();
+    }
+    
+    // Handle income conversion to number
+    if (req.body.income !== undefined) {
+      user.income = Number(req.body.income);
+    }
+    
+    // Handle phoneNumber conversion to string
+    if (req.body.phoneNumber !== undefined) {
+      user.phoneNumber = String(req.body.phoneNumber);
+    }
     // Handle profile photo upload
     if (req.file) {
       console.log('Profile photo upload detected:', req.file.originalname);
-      // Save file to disk (e.g., /uploads/profilePhotos/)
-      const uploadDir = path.join(__dirname, '../uploads/profilePhotos');
-      const fs = require('fs');
-      if (!fs.existsSync(uploadDir)) {
-        fs.mkdirSync(uploadDir, { recursive: true });
+      try {
+        // Save file to disk (e.g., /uploads/profilePhotos/)
+        const uploadDir = path.join(__dirname, '../uploads/profilePhotos');
+        const fs = require('fs');
+        if (!fs.existsSync(uploadDir)) {
+          fs.mkdirSync(uploadDir, { recursive: true });
+        }
+        const ext = path.extname(req.file.originalname);
+        const fileName = `${userId}_${Date.now()}${ext}`;
+        const filePath = path.join(uploadDir, fileName);
+        fs.writeFileSync(filePath, req.file.buffer);
+        user.profilePhoto = `/uploads/profilePhotos/${fileName}`;
+        console.log('Profile photo saved:', user.profilePhoto);
+      } catch (fileError) {
+        console.error('Error saving profile photo:', fileError);
+        return res.status(500).json({ 
+          success: false, 
+          message: 'Error saving profile photo. Please try again.' 
+        });
       }
-      const ext = path.extname(req.file.originalname);
-      const fileName = `${userId}_${Date.now()}${ext}`;
-      const filePath = path.join(uploadDir, fileName);
-      fs.writeFileSync(filePath, req.file.buffer);
-      user.profilePhoto = `/uploads/profilePhotos/${fileName}`;
-      console.log('Profile photo saved:', user.profilePhoto);
     } else {
       console.log('No profile photo file uploaded');
     }
+      
     await user.save();
+    
+    console.log('User updated successfully:', user._id);
+    
     res.json({ 
       success: true, 
       message: 'User updated successfully', 
@@ -333,7 +399,27 @@ exports.updateUser = async (req, res) => {
     });
   } catch (error) {
     console.error('Error in updateUser:', error.message);
-    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+    
+    // Handle specific MongoDB errors
+    if (error.code === 11000) {
+      // Duplicate key error
+      const field = Object.keys(error.keyPattern)[0];
+      return res.status(400).json({ 
+        success: false, 
+        message: `${field} already exists` 
+      });
+    }
+    
+    // Handle validation errors
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({ 
+        success: false, 
+        message: messages.join(', ') 
+      });
+    }
+    
+    res.status(500).json({ success: false, message: 'Unable to save profile. Please try again.' });
   }
 };
 
