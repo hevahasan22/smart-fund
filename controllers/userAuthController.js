@@ -3,6 +3,7 @@ const jwt = require('jsonwebtoken');
 const nodemailer = require('nodemailer');
 const { User, validateRegisterUser, validateLoginUser, ValidateUpdateUser } = require('../models/user');
 const path = require('path');
+const crypto = require('crypto');
 
 // Nodemailer setup (using Gmail)
 const transporter = nodemailer.createTransport({
@@ -234,6 +235,114 @@ exports.verifyEmail = async (req, res) => {
     });
   } catch (error) {
     console.error('Error in verifyEmail:', error.message);
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+};
+
+// Request password reset: generate token, store hashed, email link
+exports.requestPasswordReset = async (req, res) => {
+  try {
+    const { email } = req.body;
+    const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+    if (!normalizedEmail) {
+      return res.status(400).json({ success: false, message: 'Email is required' });
+    }
+
+    const user = await User.findOne({ email: normalizedEmail });
+    if (!user) {
+      // For privacy, always respond success
+      return res.json({ success: true, message: 'the reset link was sent to your email' });
+    }
+
+    // Create token and hash it
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
+
+    user.passwordResetToken = hashedToken;
+    user.passwordResetExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+    await user.save();
+
+    const resetUrl = `${process.env.FRONTEND_BASE_URL || 'http://localhost:3000'}/reset-password?token=${rawToken}&email=${encodeURIComponent(normalizedEmail)}`;
+
+
+    const mailOptions = {
+      from: process.env.EMAIL_USER,
+      to: normalizedEmail,
+      subject: 'Password Reset Instructions',
+      html: `
+        <p>You requested to reset your password.</p>
+        <p>This link will expire in 10 minutes.</p>
+        <p><a href="${resetUrl}">Reset your password</a></p>
+        <p>If you did not request this, you can ignore this email.</p>
+      `,
+    };
+
+    try {
+      await transporter.sendMail(mailOptions);
+    } catch (mailErr) {
+      // Cleanup if email fails
+      user.passwordResetToken = undefined;
+      user.passwordResetExpires = undefined;
+      await user.save();
+      throw mailErr;
+    }
+
+    res.json({ success: true, message: 'the reset link was sent to your email' });
+  } catch (error) {
+    console.error('Error in requestPasswordReset:', error.message);
+    res.status(500).json({ success: false, message: 'Server error', error: error.message });
+  }
+};
+
+// Reset password: validate token, set new password, invalidate token
+exports.resetPassword = async (req, res) => {
+  try {
+    const { email, token: bodyToken, newPassword } = req.body;
+    const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+    // Accept token from body or query string
+    const tokenSource = bodyToken || req.query.token;
+    if (!normalizedEmail || !tokenSource || !newPassword) {
+      return res.status(400).json({ success: false, message: 'email, token and newPassword are required' });
+    }
+    if (typeof newPassword !== 'string' || newPassword.length < 8) {
+      return res.status(400).json({ success: false, message: 'Password must be at least 8 characters' });
+    }
+
+    // Normalize token: URL-decode and trim
+    let rawToken = tokenSource;
+    try { rawToken = decodeURIComponent(tokenSource); } catch (_) { /* ignore */ }
+    rawToken = String(rawToken).trim();
+
+    const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
+ 
+    let user = await User.findOne({
+      email: normalizedEmail,
+      passwordResetToken: hashedToken,
+      passwordResetExpires: { $gt: new Date() },
+    });
+
+    // Fallback for clients that send the already hashed token
+    if (!user) {
+      user = await User.findOne({
+        email: normalizedEmail,
+        passwordResetToken: rawToken,
+        passwordResetExpires: { $gt: new Date() },
+      });
+    }
+
+    if (!user) {
+      return res.status(400).json({ success: false, message: 'Invalid or expired reset token' });
+    }
+
+    const saltRounds = 12;
+    user.password = await bcrypt.hash(newPassword, saltRounds);
+    user.passwordResetToken = undefined;
+    user.passwordResetExpires = undefined;
+    await user.save();
+
+    res.json({ success: true, message: 'Password has been reset successfully' });
+  } catch (error) {
+    console.error('Error in resetPassword:', error.message);
     res.status(500).json({ success: false, message: 'Server error', error: error.message });
   }
 };

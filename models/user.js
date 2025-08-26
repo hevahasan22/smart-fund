@@ -124,6 +124,15 @@ const userSchema = new mongoose.Schema(
     verificationCodeExpires: {
       type: Date,
     },
+    passwordResetToken: {
+      type: String,
+      default: undefined,
+      index: true,
+    },
+    passwordResetExpires: {
+      type: Date,
+      default: undefined,
+    },
     isActive: {
     type: Boolean,
     default: true, // Users are active by default
