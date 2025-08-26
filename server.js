@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express=require('express');
+const axios=require('axios')
 const mongoose  = require('mongoose');
 const cors= require('cors');
 const path = require('path');
@@ -83,6 +84,26 @@ app.use(require('./middleware/requestLogger'));
 // Routes
 const apiRoutes =require ('./routes/api')
 app.use('/api',apiRoutes)
+
+// Chat endpoint
+app.post("/api/chat", async (req, res) => {
+  try {
+    const { message } = req.body;
+    if (!message || typeof message !== 'string' || message.trim().length === 0) {
+      return res.status(400).json({ error: 'message is required and must be a non-empty string' });
+    }
+
+    const flaskRes = await axios.post("http://localhost:5000/chat", {
+      prompt: message,
+    });
+    res.json({ answer: flaskRes.data.response });
+  } catch (err) {
+    const status = err.response?.status || 500;
+    const data = err.response?.data;
+    console.error('Chat proxy error:', { message: err.message, status, data });
+    res.status(500).json({ error: err.message, detail: data });
+  }
+});
 
 // require middleware
 const errorHandler=require('./middleware/errorHandler')
