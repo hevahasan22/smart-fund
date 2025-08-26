@@ -1233,6 +1233,44 @@ exports.getDashboardStats = async (req, res) => {
       })
     ]);
     
+    // Generate monthly contract rate data for line chart (last 12 months)
+    const monthlyContractData = [];
+    const currentDate = new Date();
+    
+    for (let i = 11; i >= 0; i--) {
+      const monthDate = new Date(currentDate.getFullYear(), currentDate.getMonth() - i, 1);
+      const nextMonthDate = new Date(currentDate.getFullYear(), currentDate.getMonth() - i + 1, 1);
+      
+      const monthName = monthDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+      
+      // Get contracts for this month
+      const [monthlyTotal, monthlyApproved, monthlyPending, monthlyRejected] = await Promise.all([
+        Contract.countDocuments({
+          createdAt: { $gte: monthDate, $lt: nextMonthDate }
+        }),
+        Contract.countDocuments({
+          createdAt: { $gte: monthDate, $lt: nextMonthDate },
+          status: { $in: ['approved', 'active', 'completed'] }
+        }),
+        Contract.countDocuments({
+          createdAt: { $gte: monthDate, $lt: nextMonthDate },
+          status: { $in: ['pending', 'pending_sponsor_approval', 'pending_document_approval', 'pending_processing', 'pending_document_upload'] }
+        }),
+        Contract.countDocuments({
+          createdAt: { $gte: monthDate, $lt: nextMonthDate },
+          status: 'rejected'
+        })
+      ]);
+      
+      monthlyContractData.push({
+        month: monthName,
+        total: monthlyTotal,
+        approved: monthlyApproved,
+        pending: monthlyPending,
+        rejected: monthlyRejected
+      });
+    }
+    
     console.log(`Dashboard stats calculated - Users: ${totalUsers}, Contracts: ${totalContracts}, Approved: ${approvedContracts}, Rejected: ${rejectedContracts}`);
     
     res.json({
@@ -1268,6 +1306,15 @@ exports.getDashboardStats = async (req, res) => {
         approvalRate: totalContracts > 0 ? Math.round((approvedContracts / totalContracts) * 100) : 0,
         rejectionRate: totalContracts > 0 ? Math.round((rejectedContracts / totalContracts) * 100) : 0,
         pendingRate: totalContracts > 0 ? Math.round((pendingContracts / totalContracts) * 100) : 0
+      },
+      monthlyContractTrends: {
+        data: monthlyContractData,
+        summary: {
+          totalApplications: monthlyContractData.reduce((sum, month) => sum + month.total, 0),
+          averageMonthlyApplications: Math.round(monthlyContractData.reduce((sum, month) => sum + month.total, 0) / 12),
+          highestMonth: monthlyContractData.reduce((max, month) => month.total > max.total ? month : max, monthlyContractData[0]),
+          lowestMonth: monthlyContractData.reduce((min, month) => month.total < min.total ? month : min, monthlyContractData[0])
+        }
       }
     });
   } catch (error) {
@@ -1275,6 +1322,509 @@ exports.getDashboardStats = async (req, res) => {
     res.status(500).json({ 
       success: false, 
       error: 'Error fetching dashboard statistics', 
+      details: error.message 
+    });
+  }
+};
+
+// Get active loans for each user
+exports.getUserActiveLoans = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { page = 1, limit = 20 } = req.query;
+    
+    console.log(`Getting active loans for user ${userId}`);
+    
+    // First, verify the user exists
+    const user = await User.findById(userId)
+      .select('userFirstName userLastName email role')
+      .lean();
+    
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'User not found' 
+      });
+    }
+    
+    // Find all active contracts where user is either borrower or sponsor
+    const activeContracts = await Contract.find({
+      $or: [
+        { userID: userId },           // User is borrower
+        { sponsorID_1: userId },      // User is sponsor 1
+        { sponsorID_2: userId }       // User is sponsor 2
+      ],
+      status: 'active'
+    })
+    .populate('userID', 'userFirstName userLastName email')
+    .populate('sponsorID_1', 'userFirstName userLastName email')
+    .populate('sponsorID_2', 'userFirstName userLastName email')
+    .populate({
+      path: 'typeTermID',
+      populate: [
+        { path: 'loanTypeID', select: 'loanName' },
+        { path: 'loanTermID', select: 'type' }
+      ]
+    })
+    .populate('loanID')
+    .sort({ createdAt: -1 })
+    .limit(parseInt(limit))
+    .skip((parseInt(page) - 1) * parseInt(limit))
+    .lean();
+    
+    const total = await Contract.countDocuments({
+      $or: [
+        { userID: userId },
+        { sponsorID_1: userId },
+        { sponsorID_2: userId }
+      ],
+      status: 'active'
+    });
+    
+    // Get payment information for each contract
+    const contractsWithPayments = await Promise.all(activeContracts.map(async (contract) => {
+      let payments = [];
+      if (contract.loanID) {
+        payments = await Payment.find({ loanID: contract.loanID._id })
+          .sort({ dueDate: 1 })
+          .lean();
+      }
+      
+      // Determine user's role in this contract
+      let userRole = 'unknown';
+      let roleDescription = '';
+      if (contract.userID._id.toString() === userId) {
+        userRole = 'borrower';
+        roleDescription = 'Primary borrower of this loan';
+      } else if (contract.sponsorID_1._id.toString() === userId) {
+        userRole = 'sponsor_1';
+        roleDescription = 'Primary sponsor/guarantor for this loan';
+      } else if (contract.sponsorID_2._id.toString() === userId) {
+        userRole = 'sponsor_2';
+        roleDescription = 'Secondary sponsor/guarantor for this loan';
+      }
+      
+      // Calculate payment statistics
+      const totalPayments = payments.length;
+      const paidPayments = payments.filter(p => p.status === 'paid').length;
+      const overduePayments = payments.filter(p => 
+        p.status === 'unpaid' && new Date(p.dueDate) < new Date()
+      ).length;
+      
+      // Calculate loan progress
+      const progressPercentage = totalPayments > 0 ? Math.round((paidPayments / totalPayments) * 100) : 0;
+      
+      // Calculate remaining balance
+      const totalLoanAmount = contract.tempLoanAmount;
+      const paidAmount = payments.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0);
+      const remainingBalance = totalLoanAmount - paidAmount;
+      
+      return {
+        contractId: contract._id,
+        userRole,
+        roleDescription,
+        loanDetails: {
+          loanId: contract.loanID ? contract.loanID._id : null,
+          amount: contract.tempLoanAmount,
+          termMonths: contract.tempLoanTermMonths,
+          startDate: contract.tempStartDate,
+          endDate: contract.loanID ? contract.loanID.endDate : null,
+          interestRate: contract.loanID ? contract.loanID.interestRate : null,
+          status: contract.loanID ? contract.loanID.status : 'pending',
+          remainingBalance: Math.max(0, remainingBalance)
+        },
+        loanType: {
+          name: contract.typeTermID.name,
+          type: contract.typeTermID.loanTypeID.loanName,
+          term: contract.typeTermID.loanTermID.type
+        },
+        participants: {
+          borrower: {
+            id: contract.userID._id,
+            firstName: contract.userID.userFirstName,
+            lastName: contract.userID.userLastName,
+            email: contract.userID.email
+          },
+          sponsor1: {
+            id: contract.sponsorID_1._id,
+            firstName: contract.sponsorID_1.userFirstName,
+            lastName: contract.sponsorID_1.userLastName,
+            email: contract.sponsorID_1.email
+          },
+          sponsor2: {
+            id: contract.sponsorID_2._id,
+            firstName: contract.sponsorID_2.userFirstName,
+            lastName: contract.sponsorID_2.userLastName,
+            email: contract.sponsorID_2.email
+          }
+        },
+        paymentStats: {
+          total: totalPayments,
+          paid: paidPayments,
+          unpaid: totalPayments - paidPayments,
+          overdue: overduePayments,
+          progressPercentage
+        },
+        contractStatus: contract.status,
+        createdAt: contract.createdAt,
+        approvedAt: contract.approvedAt
+      };
+    }));
+    
+    console.log(`Found ${activeContracts.length} active loans for user ${userId}`);
+    
+    // Calculate summary statistics
+    const borrowerLoans = contractsWithPayments.filter(loan => loan.userRole === 'borrower');
+    const sponsorLoans = contractsWithPayments.filter(loan => loan.userRole.startsWith('sponsor'));
+    
+    const totalBorrowedAmount = borrowerLoans.reduce((sum, loan) => sum + loan.loanDetails.amount, 0);
+    const totalSponsoredAmount = sponsorLoans.reduce((sum, loan) => sum + loan.loanDetails.amount, 0);
+    const totalRemainingBalance = contractsWithPayments.reduce((sum, loan) => sum + loan.loanDetails.remainingBalance, 0);
+    
+    res.json({
+      success: true,
+      user: {
+        id: user._id,
+        firstName: user.userFirstName,
+        lastName: user.userLastName,
+        email: user.email,
+        role: user.role
+      },
+      summary: {
+        totalActiveLoans: contractsWithPayments.length,
+        asBorrower: {
+          count: borrowerLoans.length,
+          totalAmount: totalBorrowedAmount
+        },
+        asSponsor: {
+          count: sponsorLoans.length,
+          totalSponsoredAmount: totalSponsoredAmount
+        },
+        totalRemainingBalance
+      },
+      activeLoans: contractsWithPayments,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (error) {
+    console.error('Error getting user active loans:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Error fetching user active loans', 
+      details: error.message 
+    });
+  }
+};
+
+// Get all users with their active loans summary
+exports.getAllUsersWithActiveLoans = async (req, res) => {
+  try {
+    const { page = 1, limit = 20, search } = req.query;
+    
+    console.log(`Getting all users with active loans summary - Page: ${page}, Limit: ${limit}`);
+    
+    // Build user query
+    const userQuery = { status: { $ne: 'inactive' } };
+    if (search) {
+      userQuery.$or = [
+        { userFirstName: { $regex: search, $options: 'i' } },
+        { userLastName: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    // Get users with pagination
+    const users = await User.find(userQuery)
+      .select('userFirstName userLastName email role createdAt status')
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .lean();
+    
+    const totalUsers = await User.countDocuments(userQuery);
+    
+    // Get active loans count for each user
+    const usersWithLoanCounts = await Promise.all(users.map(async (user) => {
+      const [borrowerLoans, sponsorLoans] = await Promise.all([
+        Contract.countDocuments({ userID: user._id, status: 'active' }),
+        Contract.countDocuments({
+          $or: [{ sponsorID_1: user._id }, { sponsorID_2: user._id }],
+          status: 'active'
+        })
+      ]);
+      
+      const totalActiveLoans = borrowerLoans + sponsorLoans;
+      
+      return {
+        ...user,
+        activeLoans: {
+          asBorrower: borrowerLoans,
+          asSponsor: sponsorLoans,
+          total: totalActiveLoans
+        }
+      };
+    }));
+    
+    console.log(`Found ${users.length} users with active loans summary`);
+    
+    res.json({
+      success: true,
+      users: usersWithLoanCounts,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: totalUsers,
+        pages: Math.ceil(totalUsers / parseInt(limit))
+      },
+      filters: {
+        search
+      }
+    });
+  } catch (error) {
+    console.error('Error getting all users with active loans:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Error fetching users with active loans', 
+      details: error.message 
+    });
+  }
+};
+
+// Get all completed loans for a user (basic information without payments)
+exports.getUserCompletedLoans = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { page = 1, limit = 20 } = req.query;
+    
+    console.log(`Getting completed loans for user ${userId}`);
+    
+    // First, verify the user exists
+    const user = await User.findById(userId)
+      .select('userFirstName userLastName email role')
+      .lean();
+    
+    if (!user) {
+      return res.status(404).json({ 
+        success: false, 
+        error: 'User not found' 
+      });
+    }
+    
+    // Find all completed contracts where user is either borrower or sponsor
+    const completedContracts = await Contract.find({
+      $or: [
+        { userID: userId },           // User is borrower
+        { sponsorID_1: userId },      // User is sponsor 1
+        { sponsorID_2: userId }       // User is sponsor 2
+      ],
+      status: 'completed'
+    })
+    .populate('userID', 'userFirstName userLastName email')
+    .populate('sponsorID_1', 'userFirstName userLastName email')
+    .populate('sponsorID_2', 'userFirstName userLastName email')
+    .populate({
+      path: 'typeTermID',
+      populate: [
+        { path: 'loanTypeID', select: 'loanName' },
+        { path: 'loanTermID', select: 'type' }
+      ]
+    })
+    .populate('loanID')
+    .sort({ createdAt: -1 })
+    .limit(parseInt(limit))
+    .skip((parseInt(page) - 1) * parseInt(limit))
+    .lean();
+    
+    const total = await Contract.countDocuments({
+      $or: [
+        { userID: userId },
+        { sponsorID_1: userId },
+        { sponsorID_2: userId }
+      ],
+      status: 'completed'
+    });
+    
+    // Process contracts with basic information (no payment details)
+    const completedLoans = completedContracts.map((contract) => {
+      // Determine user's role in this contract
+      let userRole = 'unknown';
+      let roleDescription = '';
+      if (contract.userID._id.toString() === userId) {
+        userRole = 'borrower';
+        roleDescription = 'Primary borrower of this loan';
+      } else if (contract.sponsorID_1._id.toString() === userId) {
+        userRole = 'sponsor_1';
+        roleDescription = 'Primary sponsor/guarantor for this loan';
+      } else if (contract.sponsorID_2._id.toString() === userId) {
+        userRole = 'sponsor_2';
+        roleDescription = 'Secondary sponsor/guarantor for this loan';
+      }
+      
+      return {
+        contractId: contract._id,
+        userRole,
+        roleDescription,
+        loanDetails: {
+          loanId: contract.loanID ? contract.loanID._id : null,
+          amount: contract.tempLoanAmount,
+          termMonths: contract.tempLoanTermMonths,
+          startDate: contract.tempStartDate,
+          endDate: contract.loanID ? contract.loanID.endDate : null,
+          interestRate: contract.loanID ? contract.loanID.interestRate : null,
+          status: contract.loanID ? contract.loanID.status : 'completed'
+        },
+        loanType: {
+          name: contract.typeTermID.name,
+          type: contract.typeTermID.loanTypeID.loanName,
+          term: contract.typeTermID.loanTermID.type
+        },
+        participants: {
+          borrower: {
+            id: contract.userID._id,
+            firstName: contract.userID.userFirstName,
+            lastName: contract.userID.userLastName,
+            email: contract.userID.email
+          },
+          sponsor1: {
+            id: contract.sponsorID_1._id,
+            firstName: contract.sponsorID_1.userFirstName,
+            lastName: contract.sponsorID_1.userLastName,
+            email: contract.sponsorID_1.email
+          },
+          sponsor2: {
+            id: contract.sponsorID_2._id,
+            firstName: contract.sponsorID_2.userFirstName,
+            lastName: contract.sponsorID_2.userLastName,
+            email: contract.sponsorID_2.email
+          }
+        },
+        contractStatus: contract.status,
+        createdAt: contract.createdAt,
+        approvedAt: contract.approvedAt,
+        completedAt: contract.loanID ? contract.loanID.updatedAt : contract.updatedAt
+      };
+    });
+    
+    console.log(`Found ${completedContracts.length} completed loans for user ${userId}`);
+    
+    // Calculate summary statistics
+    const borrowerLoans = completedLoans.filter(loan => loan.userRole === 'borrower');
+    const sponsorLoans = completedLoans.filter(loan => loan.userRole.startsWith('sponsor'));
+    
+    const totalBorrowedAmount = borrowerLoans.reduce((sum, loan) => sum + loan.loanDetails.amount, 0);
+    const totalSponsoredAmount = sponsorLoans.reduce((sum, loan) => sum + loan.loanDetails.amount, 0);
+    
+    res.json({
+      success: true,
+      user: {
+        id: user._id,
+        firstName: user.userFirstName,
+        lastName: user.userLastName,
+        email: user.email,
+        role: user.role
+      },
+      summary: {
+        totalCompletedLoans: completedLoans.length,
+        asBorrower: {
+          count: borrowerLoans.length,
+          totalAmount: totalBorrowedAmount
+        },
+        asSponsor: {
+          count: sponsorLoans.length,
+          totalSponsoredAmount: totalSponsoredAmount
+        }
+      },
+      completedLoans,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (error) {
+    console.error('Error getting user completed loans:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Error fetching user completed loans', 
+      details: error.message 
+    });
+  }
+};
+
+// Get all users with their completed loans summary
+exports.getAllUsersWithCompletedLoans = async (req, res) => {
+  try {
+    const { page = 1, limit = 20, search } = req.query;
+    
+    console.log(`Getting all users with completed loans summary - Page: ${page}, Limit: ${limit}`);
+    
+    // Build user query
+    const userQuery = { status: { $ne: 'inactive' } };
+    if (search) {
+      userQuery.$or = [
+        { userFirstName: { $regex: search, $options: 'i' } },
+        { userLastName: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    // Get users with pagination
+    const users = await User.find(userQuery)
+      .select('userFirstName userLastName email role createdAt status')
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .skip((parseInt(page) - 1) * parseInt(limit))
+      .lean();
+    
+    const totalUsers = await User.countDocuments(userQuery);
+    
+    // Get completed loans count for each user
+    const usersWithLoanCounts = await Promise.all(users.map(async (user) => {
+      const [borrowerLoans, sponsorLoans] = await Promise.all([
+        Contract.countDocuments({ userID: user._id, status: 'completed' }),
+        Contract.countDocuments({
+          $or: [{ sponsorID_1: user._id }, { sponsorID_2: user._id }],
+          status: 'completed'
+        })
+      ]);
+      
+      const totalCompletedLoans = borrowerLoans + sponsorLoans;
+      
+      return {
+        ...user,
+        completedLoans: {
+          asBorrower: borrowerLoans,
+          asSponsor: sponsorLoans,
+          total: totalCompletedLoans
+        }
+      };
+    }));
+    
+    console.log(`Found ${users.length} users with completed loans summary`);
+    
+    res.json({
+      success: true,
+      users: usersWithLoanCounts,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: totalUsers,
+        pages: Math.ceil(totalUsers / parseInt(limit))
+      },
+      filters: {
+        search
+      }
+    });
+  } catch (error) {
+    console.error('Error getting all users with completed loans:', error);
+    res.status(500).json({ 
+      success: false, 
+      error: 'Error fetching users with completed loans', 
       details: error.message 
     });
   }

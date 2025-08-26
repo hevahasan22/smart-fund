@@ -9,6 +9,14 @@ router.get('/users/:userId', authenticate, requireAdmin, adminController.getUser
 router.delete('/users/:userId', authenticate, requireAdmin, adminController.deleteUser);
 router.put('/users/:userId/reactivate', authenticate, requireAdmin, adminController.reactivateUser);
 
+// Active Loans Management
+router.get('/users/:userId/active-loans', authenticate, requireAdmin, adminController.getUserActiveLoans);
+router.get('/users/active-loans/summary', authenticate, requireAdmin, adminController.getAllUsersWithActiveLoans);
+
+// Completed Loans Management
+router.get('/users/:userId/completed-loans', authenticate, requireAdmin, adminController.getUserCompletedLoans);
+router.get('/users/completed-loans/summary', authenticate, requireAdmin, adminController.getAllUsersWithCompletedLoans);
+
 // Contract Management
 router.get('/contracts/:contractId/review', authenticate, requireAdmin, adminController.reviewContract);
 router.put('/contracts/:contractId/status', authenticate, requireAdmin, adminController.updateContractStatus);
