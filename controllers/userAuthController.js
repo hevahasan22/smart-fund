@@ -347,7 +347,7 @@ exports.resetPassword = async (req, res) => {
   }
 };
 
-// Get user by ID
+// Get user 
 exports.getUser = async (req, res) => {
   try {
     // Use the authenticated user's ID from the token
@@ -365,7 +365,8 @@ exports.getUser = async (req, res) => {
       success: true,
       user: {
         email: user.email,
-        fullName: `${user.userFirstName} ${user.userLastName}`,
+        firstName:user.userFirstName,
+        lastName:user.userLastName,
         gender: user.gender,
         income: user.income,
         creditID: user.creditID,
