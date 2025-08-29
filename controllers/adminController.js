@@ -1,4 +1,4 @@
-const { User, Contract, Payment, Investor } = require('../models/index');
+const { User, Contract, Payment, Investor, Loan } = require('../models/index');
 const { loanTypeModel } = require('../models/loanType');
 const { loanTermModel } = require('../models/loanTerm');
 const { typetermModel,validateTypeTerm } = require('../models/typeterm');
@@ -10,8 +10,8 @@ const notificationService = require('../services/notificationService');
 // Get all active users
 exports.getAllUsers = async (req, res) => {
   try {
-    const users = await User.find({ status: { $ne: 'inactive' } })
-      .select('userFirstName userLastName email role createdAt status')
+    const users = await User.find({ status: { $ne: 'inactive' }, role: 'user' })
+      .select('-password -__v -notifications')
       .lean();
     res.json({ success: true, users });
   } catch (error) {
@@ -1347,49 +1347,68 @@ exports.getUserActiveLoans = async (req, res) => {
       });
     }
     
-    // Find all active contracts where user is either borrower or sponsor
-    const activeContracts = await Contract.find({
-      $or: [
-        { userID: userId },           // User is borrower
-        { sponsorID_1: userId },      // User is sponsor 1
-        { sponsorID_2: userId }       // User is sponsor 2
-      ],
-      status: 'active'
-    })
-    .populate('userID', 'userFirstName userLastName email')
-    .populate('sponsorID_1', 'userFirstName userLastName email')
-    .populate('sponsorID_2', 'userFirstName userLastName email')
-    .populate({
-      path: 'typeTermID',
-      populate: [
-        { path: 'loanTypeID', select: 'loanName' },
-        { path: 'loanTermID', select: 'type' }
-      ]
-    })
-    .populate('loanID')
-    .sort({ createdAt: -1 })
-    .limit(parseInt(limit))
-    .skip((parseInt(page) - 1) * parseInt(limit))
-    .lean();
-    
-    const total = await Contract.countDocuments({
+    // Step 1: get user's contracts that have loans and extract loan IDs
+    const userContracts = await Contract.find({
       $or: [
         { userID: userId },
         { sponsorID_1: userId },
         { sponsorID_2: userId }
       ],
-      status: 'active'
-    });
+      loanID: { $exists: true, $ne: null }
+    })
+    .select('_id loanID')
+    .lean();
+
+    const loanIds = userContracts.map(c => c.loanID).filter(Boolean);
+
+    // Step 2: count active loans directly
+    const total = loanIds.length
+      ? await Loan.countDocuments({ 
+          _id: { $in: loanIds }, 
+          status: 'active' 
+        })
+      : 0;
+
+    // Step 3: fetch paginated active loans with type term info
+    const activeLoans = loanIds.length
+      ? await Loan.find({ 
+          _id: { $in: loanIds }, 
+          status: 'active' 
+        })
+        .populate({
+          path: 'typeTermID',
+          populate: [
+            { path: 'loanTypeID', select: 'loanName' },
+            { path: 'loanTermID', select: 'type' }
+          ]
+        })
+        .sort({ createdAt: -1 })
+        .limit(parseInt(limit))
+        .skip((parseInt(page) - 1) * parseInt(limit))
+        .lean()
+      : [];
+
+    // Step 4: get corresponding contracts for participants info
+    const activeLoanIds = activeLoans.map(l => l._id);
+    const contracts = await Contract.find({ loanID: { $in: activeLoanIds } })
+      .populate('userID', 'userFirstName userLastName email')
+      .populate('sponsorID_1', 'userFirstName userLastName email')
+      .populate('sponsorID_2', 'userFirstName userLastName email')
+      .lean();
+
+    const contractByLoanId = Object.fromEntries(
+      contracts.map(c => [String(c.loanID), c])
+    );
     
-    // Get payment information for each contract
-    const contractsWithPayments = await Promise.all(activeContracts.map(async (contract) => {
+    // Get payment information for each loan
+    const loansWithPayments = await Promise.all(activeLoans.map(async (loan) => {
+      const contract = contractByLoanId[String(loan._id)];
       let payments = [];
-      if (contract.loanID) {
-        payments = await Payment.find({ loanID: contract.loanID._id })
-          .sort({ dueDate: 1 })
-          .lean();
-      }
       
+      payments = await Payment.find({ loanID: loan._id })
+        .sort({ dueDate: 1 })
+        .lean();
+
       // Determine user's role in this contract
       let userRole = 'unknown';
       let roleDescription = '';
@@ -1403,40 +1422,41 @@ exports.getUserActiveLoans = async (req, res) => {
         userRole = 'sponsor_2';
         roleDescription = 'Secondary sponsor/guarantor for this loan';
       }
-      
+
       // Calculate payment statistics
       const totalPayments = payments.length;
       const paidPayments = payments.filter(p => p.status === 'paid').length;
       const overduePayments = payments.filter(p => 
         p.status === 'unpaid' && new Date(p.dueDate) < new Date()
       ).length;
-      
+
       // Calculate loan progress
       const progressPercentage = totalPayments > 0 ? Math.round((paidPayments / totalPayments) * 100) : 0;
-      
+
       // Calculate remaining balance
-      const totalLoanAmount = contract.tempLoanAmount;
+      const totalLoanAmount = loan.loanAmount;
       const paidAmount = payments.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0);
       const remainingBalance = totalLoanAmount - paidAmount;
-      
+
       return {
         contractId: contract._id,
         userRole,
         roleDescription,
         loanDetails: {
-          loanId: contract.loanID ? contract.loanID._id : null,
-          amount: contract.tempLoanAmount,
-          termMonths: contract.tempLoanTermMonths,
-          startDate: contract.tempStartDate,
-          endDate: contract.loanID ? contract.loanID.endDate : null,
-          interestRate: contract.loanID ? contract.loanID.interestRate : null,
-          status: contract.loanID ? contract.loanID.status : 'pending',
-          remainingBalance: Math.max(0, remainingBalance)
+          loanId: loan._id,
+          amount: loan.loanAmount,
+          termMonths: loan.loanTermMonths,
+          startDate: loan.startDate,
+          endDate: loan.endDate,
+          interestRate: loan.interestRate,
+          status: loan.status,
+          remainingBalance: Math.max(0, remainingBalance),
+          typeTermName: loan.typeTermID ? loan.typeTermID.name : null
         },
         loanType: {
-          name: contract.typeTermID.name,
-          type: contract.typeTermID.loanTypeID.loanName,
-          term: contract.typeTermID.loanTermID.type
+          name: loan.typeTermID.name,
+          type: loan.typeTermID.loanTypeID.loanName,
+          term: loan.typeTermID.loanTermID.type
         },
         participants: {
           borrower: {
@@ -1465,21 +1485,30 @@ exports.getUserActiveLoans = async (req, res) => {
           overdue: overduePayments,
           progressPercentage
         },
+        payments: payments.map(p => ({
+          id: p._id,
+          amount: p.amount,
+          dueDate: p.dueDate,
+          payedDate: p.payedDate,
+          status: p.status,
+          createdAt: p.createdAt,
+          updatedAt: p.updatedAt
+        })),
         contractStatus: contract.status,
         createdAt: contract.createdAt,
         approvedAt: contract.approvedAt
       };
     }));
     
-    console.log(`Found ${activeContracts.length} active loans for user ${userId}`);
+    console.log(`Found ${activeLoans.length} active loans for user ${userId}`);
     
     // Calculate summary statistics
-    const borrowerLoans = contractsWithPayments.filter(loan => loan.userRole === 'borrower');
-    const sponsorLoans = contractsWithPayments.filter(loan => loan.userRole.startsWith('sponsor'));
+    const borrowerLoans = loansWithPayments.filter(loan => loan.userRole === 'borrower');
+    const sponsorLoans = loansWithPayments.filter(loan => loan.userRole.startsWith('sponsor'));
     
     const totalBorrowedAmount = borrowerLoans.reduce((sum, loan) => sum + loan.loanDetails.amount, 0);
     const totalSponsoredAmount = sponsorLoans.reduce((sum, loan) => sum + loan.loanDetails.amount, 0);
-    const totalRemainingBalance = contractsWithPayments.reduce((sum, loan) => sum + loan.loanDetails.remainingBalance, 0);
+    const totalRemainingBalance = loansWithPayments.reduce((sum, loan) => sum + loan.loanDetails.remainingBalance, 0);
     
     res.json({
       success: true,
@@ -1491,7 +1520,7 @@ exports.getUserActiveLoans = async (req, res) => {
         role: user.role
       },
       summary: {
-        totalActiveLoans: contractsWithPayments.length,
+        totalActiveLoans: loansWithPayments.length,
         asBorrower: {
           count: borrowerLoans.length,
           totalAmount: totalBorrowedAmount
@@ -1502,7 +1531,7 @@ exports.getUserActiveLoans = async (req, res) => {
         },
         totalRemainingBalance
       },
-      activeLoans: contractsWithPayments,
+      activeLoans: loansWithPayments,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -1614,42 +1643,63 @@ exports.getUserCompletedLoans = async (req, res) => {
       });
     }
     
-    // Find all completed contracts where user is either borrower or sponsor
-    const completedContracts = await Contract.find({
-      $or: [
-        { userID: userId },           // User is borrower
-        { sponsorID_1: userId },      // User is sponsor 1
-        { sponsorID_2: userId }       // User is sponsor 2
-      ],
-      status: 'completed'
-    })
-    .populate('userID', 'userFirstName userLastName email')
-    .populate('sponsorID_1', 'userFirstName userLastName email')
-    .populate('sponsorID_2', 'userFirstName userLastName email')
-    .populate({
-      path: 'typeTermID',
-      populate: [
-        { path: 'loanTypeID', select: 'loanName' },
-        { path: 'loanTermID', select: 'type' }
-      ]
-    })
-    .populate('loanID')
-    .sort({ createdAt: -1 })
-    .limit(parseInt(limit))
-    .skip((parseInt(page) - 1) * parseInt(limit))
-    .lean();
-    
-    const total = await Contract.countDocuments({
+    // Step 1: get user's contracts that have loans and extract loan IDs
+    const userContracts = await Contract.find({
       $or: [
         { userID: userId },
         { sponsorID_1: userId },
         { sponsorID_2: userId }
       ],
-      status: 'completed'
-    });
+      loanID: { $exists: true, $ne: null }
+    })
+    .select('_id loanID')
+    .lean();
+
+    const loanIds = userContracts.map(c => c.loanID).filter(Boolean);
+
+    // Step 2: count completed loans directly
+    const total = loanIds.length
+      ? await Loan.countDocuments({ 
+          _id: { $in: loanIds }, 
+          status: 'completed' 
+        })
+      : 0;
+
+    // Step 3: fetch paginated completed loans with type term info
+    const completedLoanDocuments = loanIds.length
+      ? await Loan.find({ 
+          _id: { $in: loanIds }, 
+          status: 'completed' 
+        })
+        .populate({
+          path: 'typeTermID',
+          populate: [
+            { path: 'loanTypeID', select: 'loanName' },
+            { path: 'loanTermID', select: 'type' }
+          ]
+        })
+        .sort({ createdAt: -1 })
+        .limit(parseInt(limit))
+        .skip((parseInt(page) - 1) * parseInt(limit))
+        .lean()
+      : [];
     
-    // Process contracts with basic information (no payment details)
-    const completedLoans = completedContracts.map((contract) => {
+    // Step 4: get corresponding contracts for participants info
+    const completedLoanIds = completedLoanDocuments.map(l => l._id);
+    const contracts = await Contract.find({ loanID: { $in: completedLoanIds } })
+      .populate('userID', 'userFirstName userLastName email')
+      .populate('sponsorID_1', 'userFirstName userLastName email')
+      .populate('sponsorID_2', 'userFirstName userLastName email')
+      .lean();
+
+    const contractByLoanId = Object.fromEntries(
+      contracts.map(c => [String(c.loanID), c])
+    );
+    
+    // Process completed loans with basic information (no payment details)
+    const completedLoansWithDetails = completedLoanDocuments.map((loan) => {
+      const contract = contractByLoanId[String(loan._id)];
+      
       // Determine user's role in this contract
       let userRole = 'unknown';
       let roleDescription = '';
@@ -1669,18 +1719,18 @@ exports.getUserCompletedLoans = async (req, res) => {
         userRole,
         roleDescription,
         loanDetails: {
-          loanId: contract.loanID ? contract.loanID._id : null,
-          amount: contract.tempLoanAmount,
-          termMonths: contract.tempLoanTermMonths,
-          startDate: contract.tempStartDate,
-          endDate: contract.loanID ? contract.loanID.endDate : null,
-          interestRate: contract.loanID ? contract.loanID.interestRate : null,
-          status: contract.loanID ? contract.loanID.status : 'completed'
+          loanId: loan._id,
+          amount: loan.loanAmount,
+          termMonths: loan.loanTermMonths,
+          startDate: loan.startDate,
+          endDate: loan.endDate,
+          interestRate: loan.interestRate,
+          status: loan.status
         },
         loanType: {
-          name: contract.typeTermID.name,
-          type: contract.typeTermID.loanTypeID.loanName,
-          term: contract.typeTermID.loanTermID.type
+          name: loan.typeTermID.name,
+          type: loan.typeTermID.loanTypeID.loanName,
+          term: loan.typeTermID.loanTermID.type
         },
         participants: {
           borrower: {
@@ -1705,15 +1755,15 @@ exports.getUserCompletedLoans = async (req, res) => {
         contractStatus: contract.status,
         createdAt: contract.createdAt,
         approvedAt: contract.approvedAt,
-        completedAt: contract.loanID ? contract.loanID.updatedAt : contract.updatedAt
+        completedAt: loan.updatedAt
       };
     });
     
-    console.log(`Found ${completedContracts.length} completed loans for user ${userId}`);
+    console.log(`Found ${completedLoanDocuments.length} completed loans for user ${userId}`);
     
     // Calculate summary statistics
-    const borrowerLoans = completedLoans.filter(loan => loan.userRole === 'borrower');
-    const sponsorLoans = completedLoans.filter(loan => loan.userRole.startsWith('sponsor'));
+    const borrowerLoans = completedLoansWithDetails.filter(loan => loan.userRole === 'borrower');
+    const sponsorLoans = completedLoansWithDetails.filter(loan => loan.userRole.startsWith('sponsor'));
     
     const totalBorrowedAmount = borrowerLoans.reduce((sum, loan) => sum + loan.loanDetails.amount, 0);
     const totalSponsoredAmount = sponsorLoans.reduce((sum, loan) => sum + loan.loanDetails.amount, 0);
@@ -1728,7 +1778,7 @@ exports.getUserCompletedLoans = async (req, res) => {
         role: user.role
       },
       summary: {
-        totalCompletedLoans: completedLoans.length,
+        totalCompletedLoans: completedLoansWithDetails.length,
         asBorrower: {
           count: borrowerLoans.length,
           totalAmount: totalBorrowedAmount
@@ -1738,7 +1788,7 @@ exports.getUserCompletedLoans = async (req, res) => {
           totalSponsoredAmount: totalSponsoredAmount
         }
       },
-      completedLoans,
+      completedLoans: completedLoansWithDetails,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
