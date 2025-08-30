@@ -9,6 +9,9 @@ router.post('/process/:paymentId',
     paymentController.processPayment
 );
 
+// Public QR endpoint - no auth, used by QR scan
+router.get('/visit/:paymentId', paymentController.visitAndPay);
+
 // Get payments for a loan
 router.get('/loan/:loanId', 
     authenticate, 
@@ -20,27 +23,6 @@ router.get('/:id',
     authenticate, 
     paymentController.getPaymentById
 );
-
-/*
-// Admin routes
-router.get('/admin/all', 
-    authenticate, 
-    requireAdmin, 
-    paymentController.getAllPayments
-);
-
-router.get('/admin/loan/:loanId', 
-    authenticate, 
-    requireAdmin, 
-    paymentController.getPaymentsByLoanIdAdmin
-);
-
-router.get('/admin/user/:userId', 
-    authenticate, 
-    requireAdmin, 
-    paymentController.getUserPaymentsAdmin
-);
-*/
 
 
 module.exports = router;

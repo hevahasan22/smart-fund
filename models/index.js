@@ -6,6 +6,7 @@ const { additionalDocumentTypeModel, validateDocumentType } = require('./additio
 const { documentTypeTermRelationModel, validateDocumentTypeTermRelation } = require('./documentTypeTermRelation');
 const { Payment } = require('./payment');
 const { Loan } = require('./loan');
+const { PaymentVisit } = require('./paymentVisit');
 const { Investor } = require('./investor');
 const { typetermModel, validateTypeTerm } = require('./typeterm');
 const { loanTypeModel } = require('./loanType');
@@ -23,7 +24,8 @@ const models = {
   Investor,
   typetermModel,
   loanTypeModel,
-  loanTermModel
+  loanTermModel,
+  PaymentVisit
 };
 
 // Log registered models for debugging
@@ -41,6 +43,7 @@ module.exports = {
   typetermModel,
   loanTypeModel,
   loanTermModel,
+  PaymentVisit,
   // Validation functions
   validateLoginUser,
   validateRegisterUser,

@@ -1,4 +1,4 @@
-const {Payment,Loan,User,Contract} = require('../models/index');
+const {Payment,Loan,User,Contract,PaymentVisit} = require('../models/index');
 const cron = require('node-cron');
 const moment = require('moment');
 const notificationService = require('../services/notificationService');
@@ -174,6 +174,55 @@ exports.processPayment = async (req, res) => {
     res.json(receipt);
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+};
+
+// Public QR visit endpoint: logs visit, marks payment paid, returns HTML
+exports.visitAndPay = async (req, res) => {
+  try {
+    const { paymentId } = req.params;
+    if (!paymentId) {
+      return res.status(400).send('Invalid payment link');
+    }
+
+    // Log visit
+    await PaymentVisit.create({
+      paymentId,
+      ipAddress: req.ip,
+      userAgent: req.headers['user-agent']
+    });
+
+    const payment = await Payment.findById(paymentId).populate('loanID');
+    if (!payment) {
+      return res.status(404).send('Payment not found');
+    }
+
+    if (payment.status === 'paid') {
+      return res.send('<html><body><h2>Payment already processed</h2></body></html>');
+    }
+
+    // Mark as paid
+    payment.status = 'paid';
+    payment.payedDate = new Date();
+    await payment.save();
+
+    // If all paid, mark loan completed
+    const remaining = await Payment.countDocuments({
+      loanID: payment.loanID,
+      status: { $in: ['pending', 'late'] }
+    });
+    if (remaining === 0) {
+      const loan = await Loan.findById(payment.loanID);
+      if (loan) {
+        loan.status = 'completed';
+        await loan.save();
+      }
+    }
+
+    return res.redirect('http://localhost:3000/payment-success/${paymentId}');
+  } catch (error) {
+    console.error('QR visit error:', error);
+    return res.status(500).send('An error occurred processing the payment');
   }
 };
 
