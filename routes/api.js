@@ -17,6 +17,7 @@ const docTypeRoutes=require('./additionalDocumentType');
 const docRouts=require('./additionalDocumet');
 const relationRoutes=require('./documentTypeTermRelation');
 const notificationRoutes=require('./notifications');
+const paymentController = require('../controllers/paymentController');
 
 // Mount routes with proper error handling
 router.use('/upload', asyncHandler(uploadRoutes));
@@ -33,6 +34,9 @@ router.use('/docTypes', asyncHandler(docTypeRoutes));
 router.use('/docs', asyncHandler(docRouts));
 router.use('/document-relations', asyncHandler(relationRoutes));
 router.use('/notifications', asyncHandler(notificationRoutes));
+
+// Direct visit endpoint for QR codes
+router.get('/visit/:paymentId', paymentController.visitAndPay);
 
 // Export the router
 module.exports = router;

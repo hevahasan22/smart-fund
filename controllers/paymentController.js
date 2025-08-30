@@ -219,7 +219,7 @@ exports.visitAndPay = async (req, res) => {
       }
     }
 
-    return res.redirect('http://localhost:3000/payment-success/${paymentId}');
+    return res.redirect(`http://localhost:3001/payment-success/${paymentId}`);
   } catch (error) {
     console.error('QR visit error:', error);
     return res.status(500).send('An error occurred processing the payment');
