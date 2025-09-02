@@ -4,7 +4,7 @@ const Joi = require('joi');
 const contractSchema = new mongoose.Schema({
     status: { 
        type: String, 
-       enum: ['pending_sponsor_approval', 'pending_document_approval', 'pending', 'pending_processing', 'approved', 'rejected', 'active', 'completed','pending_document_upload'], 
+       enum: ['pending_sponsor_approval', 'pending_document_approval', 'pending', 'pending_processing', 'approved', 'rejected', 'active', 'completed','pending_document_upload', 'queued_next_month'], 
        default: 'pending' 
     },
     employmentStatus: {
@@ -69,6 +69,13 @@ const contractSchema = new mongoose.Schema({
     },
     approvedAt: {
         type: Date 
+    },
+    // Queuing fields for monthly approval cap handling
+    queuedAt: {
+        type: Date
+    },
+    availableAt: {
+        type: Date
     }  
 }, {
     timestamps: true

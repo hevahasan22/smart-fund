@@ -53,4 +53,7 @@ router.delete('/document-types/:id', authenticate, requireAdmin, adminController
 // Dashboard Statistics
 router.get('/dashboard/stats', authenticate, requireAdmin, adminController.getDashboardStats);
 
+// Late Payments - Borrowers with overdue payments
+router.get('/borrowers/late-payments', authenticate, requireAdmin, adminController.getBorrowersWithLatePayments);
+
 module.exports = router;

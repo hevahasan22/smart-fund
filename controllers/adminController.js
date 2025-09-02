@@ -1430,13 +1430,13 @@ exports.getUserActiveLoans = async (req, res) => {
         p.status === 'unpaid' && new Date(p.dueDate) < new Date()
       ).length;
 
+      // Calculate balances using scheduled payments (includes interest)
+      const totalScheduledAmount = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
+      const paidAmount = payments.filter(p => p.status === 'paid').reduce((sum, p) => sum + (p.amount || 0), 0);
+      const remainingBalance = Math.max(0, totalScheduledAmount - paidAmount);
+
       // Calculate loan progress
       const progressPercentage = totalPayments > 0 ? Math.round((paidPayments / totalPayments) * 100) : 0;
-
-      // Calculate remaining balance
-      const totalLoanAmount = loan.loanAmount;
-      const paidAmount = payments.filter(p => p.status === 'paid').reduce((sum, p) => sum + p.amount, 0);
-      const remainingBalance = totalLoanAmount - paidAmount;
 
       return {
         contractId: contract._id,
@@ -1450,7 +1450,8 @@ exports.getUserActiveLoans = async (req, res) => {
           endDate: loan.endDate,
           interestRate: loan.interestRate,
           status: loan.status,
-          remainingBalance: Math.max(0, remainingBalance),
+          remainingBalance: remainingBalance,
+          totalBalance: totalScheduledAmount,
           typeTermName: loan.typeTermID ? loan.typeTermID.name : null
         },
         loanType: {
@@ -1505,10 +1506,11 @@ exports.getUserActiveLoans = async (req, res) => {
     // Calculate summary statistics
     const borrowerLoans = loansWithPayments.filter(loan => loan.userRole === 'borrower');
     const sponsorLoans = loansWithPayments.filter(loan => loan.userRole.startsWith('sponsor'));
-    
-    const totalBorrowedAmount = borrowerLoans.reduce((sum, loan) => sum + loan.loanDetails.amount, 0);
-    const totalSponsoredAmount = sponsorLoans.reduce((sum, loan) => sum + loan.loanDetails.amount, 0);
-    const totalRemainingBalance = loansWithPayments.reduce((sum, loan) => sum + loan.loanDetails.remainingBalance, 0);
+
+    // Totals including interest (sum of scheduled payment amounts)
+    const totalBorrowedAmount = borrowerLoans.reduce((sum, loan) => sum + (loan.loanDetails.totalBalance || 0), 0);
+    const totalSponsoredAmount = sponsorLoans.reduce((sum, loan) => sum + (loan.loanDetails.totalBalance || 0), 0);
+    const totalRemainingBalance = loansWithPayments.reduce((sum, loan) => sum + (loan.loanDetails.remainingBalance || 0), 0);
     
     res.json({
       success: true,
@@ -1877,5 +1879,145 @@ exports.getAllUsersWithCompletedLoans = async (req, res) => {
       error: 'Error fetching users with completed loans', 
       details: error.message 
     });
+  }
+};
+
+// Get borrowers with late payments
+exports.getBorrowersWithLatePayments = async (req, res) => {
+  try {
+    const { page = 1, limit = 20, search } = req.query;
+    const now = new Date();
+
+    // Build user search filter if provided
+    let userMatch = {};
+    if (search) {
+      userMatch = {
+        $or: [
+          { 'user.userFirstName': { $regex: search, $options: 'i' } },
+          { 'user.userLastName': { $regex: search, $options: 'i' } },
+          { 'user.email': { $regex: search, $options: 'i' } }
+        ]
+      };
+    }
+
+    const pipeline = [
+      // Payments that are due and not paid
+      {
+        $match: {
+          dueDate: { $lt: now },
+          status: { $ne: 'paid' }
+        }
+      },
+      // Join loan
+      {
+        $lookup: {
+          from: 'loans',
+          localField: 'loanID',
+          foreignField: '_id',
+          as: 'loan'
+        }
+      },
+      { $unwind: '$loan' },
+      // Join contract to find borrower
+      {
+        $lookup: {
+          from: 'contracts',
+          let: { loanId: '$loanID' },
+          pipeline: [
+            { $match: { $expr: { $eq: ['$loanID', '$$loanId'] } } },
+            { $project: { userID: 1, status: 1 } }
+          ],
+          as: 'contract'
+        }
+      },
+      { $unwind: '$contract' },
+      // Only consider contracts that are approved/active
+      {
+        $match: {
+          'contract.status': { $in: ['approved', 'active'] }
+        }
+      },
+      // Group by borrower
+      {
+        $group: {
+          _id: '$contract.userID',
+          latePaymentsCount: { $sum: 1 },
+          totalOverdueAmount: { $sum: '$amount' },
+          oldestDueDate: { $min: '$dueDate' },
+          latestDueDate: { $max: '$dueDate' },
+          samplePayment: { $first: '$$ROOT' }
+        }
+      },
+      // Lookup user details
+      {
+        $lookup: {
+          from: 'users',
+          localField: '_id',
+          foreignField: '_id',
+          as: 'user'
+        }
+      },
+      { $unwind: '$user' },
+      // Optional search on user fields
+      ...(search ? [{ $match: userMatch }] : []),
+      // Sort by severity then recency
+      { $sort: { latePaymentsCount: -1, totalOverdueAmount: -1, oldestDueDate: 1 } },
+      // Pagination
+      { $skip: (parseInt(page) - 1) * parseInt(limit) },
+      { $limit: parseInt(limit) },
+      // Final shape
+      {
+        $project: {
+          _id: 0,
+          borrowerId: '$_id',
+          user: {
+            id: '$user._id',
+            firstName: '$user.userFirstName',
+            lastName: '$user.userLastName',
+            email: '$user.email'
+          },
+          metrics: {
+            latePaymentsCount: 1,
+            totalOverdueAmount: 1,
+            oldestDueDate: 1,
+            latestDueDate: 1
+          }
+        }
+      }
+    ];
+
+    // Count pipeline for total
+    const countPipeline = [
+      { $match: { dueDate: { $lt: now }, status: { $ne: 'paid' } } },
+      { $lookup: { from: 'loans', localField: 'loanID', foreignField: '_id', as: 'loan' } },
+      { $unwind: '$loan' },
+      { $lookup: { from: 'contracts', let: { loanId: '$loanID' }, pipeline: [ { $match: { $expr: { $eq: ['$loanID', '$$loanId'] } } }, { $project: { userID: 1, status: 1 } } ], as: 'contract' } },
+      { $unwind: '$contract' },
+      { $match: { 'contract.status': { $in: ['approved', 'active'] } } },
+      { $group: { _id: '$contract.userID' } },
+      { $count: 'total' }
+    ];
+
+    const [results, countRes] = await Promise.all([
+      Payment.aggregate(pipeline),
+      Payment.aggregate(countPipeline)
+    ]);
+
+    const total = countRes[0]?.total || 0;
+
+    res.json({
+      success: true,
+      borrowers: results,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit))
+      },
+      filters: { search }
+    });
+  } catch (error) {
+    console.error('Error getting borrowers with late payments:', error);
+    res.status(500).json({ success: false, error: 'Error fetching borrowers with late payments', details: error.message });
   }
 };

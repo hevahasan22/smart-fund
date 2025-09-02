@@ -592,7 +592,19 @@ const calculatePriorityScore = async (contract, loanTypeName) => {
 const processPendingContracts = async () => {
   try {
     console.log('Starting to process pending contracts...');
+    // Helper to delay between processing contracts
+    const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
     
+    // Promote queued contracts whose available date has arrived to pending_processing
+    const nowForQueue = new Date();
+    const promoted = await Contract.updateMany(
+      { status: 'queued_next_month', availableAt: { $lte: nowForQueue } },
+      { $set: { status: 'pending_processing' } }
+    );
+    if (promoted && promoted.modifiedCount) {
+      console.log(`Promoted ${promoted.modifiedCount} queued contracts to pending_processing`);
+    }
+
     // Get all pending contracts sorted by priority (highest first)
     const pendingContracts = await Contract.find({
       status: 'pending_processing'
@@ -605,10 +617,17 @@ const processPendingContracts = async () => {
     
     console.log(`Found ${pendingContracts.length} contracts pending processing`);
     
+    const totalToProcess = pendingContracts.length;
+    let processedCounter = 0;
     for (const contract of pendingContracts) {
       try {
         console.log(`Processing contract ${contract._id} with priority ${contract.priority}`);
         await processSingleContract(contract);
+        processedCounter += 1;
+        if (processedCounter < totalToProcess) {
+          console.log('Waiting 3 minutes before processing next contract...');
+          await delay(3 * 60 * 1000);
+        }
       } catch (error) {
         console.error(`Error processing contract ${contract._id}:`, error);
         await rejectContract(contract, 'Processing failed');
@@ -736,12 +755,12 @@ const processSingleContract = async (contract) => {
   console.log(`Monthly approved count: ${monthlyApprovedCount}`);
   
   if (monthlyApprovedCount >= 5) {
-    console.log('Contract rejected: Monthly approval limit reached');
-    await rejectContract(
-      contract, 
-      'Monthly approval limit reached',
-      'Please try again next month'
-    );
+    console.log('Monthly approval limit reached, queuing contract for next month');
+    const nextMonthAvailableAt = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    contract.status = 'queued_next_month';
+    contract.queuedAt = new Date();
+    contract.availableAt = nextMonthAvailableAt;
+    await contract.save();
     return;
   }
   
