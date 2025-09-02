@@ -12,7 +12,19 @@ const transporter = nodemailer.createTransport({
     user: process.env.EMAIL_USER,
     pass: process.env.EMAIL_PASS,
   },
+  logger: true,
+  debug: true,
 });
+
+// Verify transport on startup to surface auth/connectivity issues early
+transporter
+  .verify()
+  .then(() => {
+    console.log('Nodemailer: Gmail transport ready');
+  })
+  .catch((verifyErr) => {
+    console.error('Nodemailer verify failed:', verifyErr && verifyErr.message ? verifyErr.message : verifyErr);
+  });
 
 // Generate 6-digit verification code
 const generateVerificationCode = () => {
@@ -262,7 +274,11 @@ exports.requestPasswordReset = async (req, res) => {
     user.passwordResetExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
     await user.save();
 
-    const resetUrl = `${process.env.FRONTEND_BASE_URL || 'http://localhost:3001'}/reset-password?token=${rawToken}&email=${encodeURIComponent(normalizedEmail)}`;
+    // Pick the best frontend URL to send the user back to
+    // Priority: explicit FRONTEND_URL env -> request Origin/Referer -> localhost:3001
+    const requestOrigin = req.get('origin') || req.get('referer');
+    const resetBaseUrl = process.env.FRONTEND_URL || (requestOrigin ? requestOrigin.replace(/\/$/, '') : 'http://localhost:3001');
+    const resetUrl = `${resetBaseUrl}/reset-password?token=${rawToken}&email=${encodeURIComponent(normalizedEmail)}`;
 
 
     const mailOptions = {
