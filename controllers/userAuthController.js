@@ -262,7 +262,7 @@ exports.requestPasswordReset = async (req, res) => {
     user.passwordResetExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
     await user.save();
 
-    const resetUrl = `${process.env.FRONTEND_BASE_URL || 'http://localhost:3000'}/reset-password?token=${rawToken}&email=${encodeURIComponent(normalizedEmail)}`;
+    const resetUrl = `${process.env.FRONTEND_BASE_URL || 'http://localhost:3001'}/reset-password?token=${rawToken}&email=${encodeURIComponent(normalizedEmail)}`;
 
 
     const mailOptions = {
