@@ -7,6 +7,7 @@ const notificationService = require('../services/notificationService');
 const { User } = require('../models/user');
 const { Contract } = require('../models/contract');
 const { Loan } = require('../models/loan');
+const { Payment } = require('../models/payment');
 const { loanTermModel } = require('../models/loanTerm');
 const { loanTypeModel } = require('../models/loanType');
 const { typetermModel } = require('../models/typeterm');
@@ -98,6 +99,44 @@ exports.createContract = async (req, res) => {
     const user = await User.findById(userId);
     if (user.email === sponsorEmail1 || user.email === sponsorEmail2) {
       return res.status(400).json({ error: 'You cannot be your own sponsor' });
+    }
+
+    // Check if user has an active loan (borrowers with active loans cannot apply for new contracts)
+    const userActiveLoans = await Contract.countDocuments({
+      userID: userId,
+      status: { $in: ['approved', 'active'] }
+    });
+    
+    if (userActiveLoans > 0) {
+      return res.status(400).json({ 
+        error: 'You cannot apply for a new loan while you have an active loan',
+        details: 'Borrowers with active (uncompleted) loans cannot apply for new contracts until their current loan is completed'
+      });
+    }
+
+    // Check if user has any late payments (borrowers with late payments cannot apply for new contracts)
+    // This check covers completed loans that might still have late payments
+    const userContractsWithLoans = await Contract.find({
+      userID: userId,
+      loanID: { $ne: null }
+    }).select('loanID');
+
+    if (userContractsWithLoans.length > 0) {
+      const loanIds = userContractsWithLoans.map(contract => contract.loanID);
+      
+      // Check for any late payments in these loans
+      const latePaymentsCount = await Payment.countDocuments({
+        loanID: { $in: loanIds },
+        status: 'late'
+      });
+      
+      if (latePaymentsCount > 0) {
+        return res.status(400).json({ 
+          error: 'You cannot apply for a new loan while you have overdue payments',
+          details: 'Borrowers with late/overdue payments must clear all outstanding payments before applying for new contracts',
+          latePaymentsCount: latePaymentsCount
+        });
+      }
     }
 
     // 1. Find loan type by name
@@ -201,7 +240,7 @@ exports.createContract = async (req, res) => {
       return res.status(400).json({ 
         error: 'One or both sponsors have active loans and cannot sponsor other loans',
         sponsorsWithActiveLoans,
-        details: 'Borrowers with active (uncompleted) loans cannot be sponsors for other loans'
+        details: 'Borrowers with active (uncompleted) loans cannot be sponsors for other loans until their current loan is completed'
       });
     }
 
@@ -849,66 +888,6 @@ exports.triggerContractProcessing = async (req, res) => {
   }
 };
 
-// Get user notifications
-exports.getUserNotifications = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const { limit = 50, unreadOnly = false } = req.query;
-    
-    console.log('Getting notifications for user:', userId);
-    
-    const user = await User.findById(userId).select('notifications');
-    
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-    
-    let notifications = user.notifications || [];
-    notifications = notifications.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-
-    // Always filter to only unread notifications
-    notifications = notifications.filter(n => !n.isRead);
-
-    notifications = notifications.slice(0, parseInt(limit));
-
-    // Enhance notifications: replace contract/payment IDs with amount and type if possible
-    const enhancedNotifications = await Promise.all(notifications.map(async (n) => {
-      let enhanced = { ...n._doc, ...n };
-      // If notification has contractId, fetch contract and loan type/amount
-      if (n.contractId) {
-        const contract = await require('../models/contract').Contract.findById(n.contractId)
-          .populate({ path: 'typeTermID', populate: { path: 'loanTypeID', select: 'loanName' } });
-        if (contract) {
-          enhanced.loanType = contract.typeTermID?.loanTypeID?.loanName || undefined;
-          enhanced.amount = contract.tempLoanAmount || undefined;
-        }
-      }
-      // If notification has amount and loanType already, keep them
-      if (n.amount && n.loanType) {
-        enhanced.amount = n.amount;
-        enhanced.loanType = n.loanType;
-      }
-      // Remove IDs from message if present
-      if (enhanced.message) {
-        enhanced.message = enhanced.message.replace(/(contract|loan|payment)\s?#?([a-f0-9]{24,})/gi, '').trim();
-      }
-      return enhanced;
-    }));
-
-    res.json({
-      notifications: enhancedNotifications,
-      totalCount: user.notifications ? user.notifications.length : 0,
-      unreadCount: user.notifications ? user.notifications.filter(n => !n.isRead).length : 0
-    });
-  } catch (error) {
-    console.error('Error in getUserNotifications:', error);
-    res.status(500).json({ 
-      error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    });
-  }
-};
-
 // Get user contracts that are still not approved
 exports.getUserPendingContracts = async (req, res) => {
   try {
@@ -949,43 +928,6 @@ exports.getUserPendingContracts = async (req, res) => {
       error: error.message,
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
-  }
-};
-
-// Mark notification as read
-exports.markNotificationAsRead = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const { notificationId } = req.params;
-    
-    const result = await User.updateOne(
-      { _id: userId, 'notifications._id': notificationId },
-      { $set: { 'notifications.$.isRead': true } }
-    );
-    
-    if (result.modifiedCount === 0) {
-      return res.status(404).json({ error: 'Notification not found' });
-    }
-    
-    res.json({ message: 'Notification marked as read' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-};
-
-// Mark all notifications as read
-exports.markAllNotificationsAsRead = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    
-    await User.updateOne(
-      { _id: userId },
-      { $set: { 'notifications.$[].isRead': true } }
-    );
-    
-    res.json({ message: 'All notifications marked as read' });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
   }
 };
 
@@ -1036,38 +978,6 @@ exports.getPendingApprovals = async (req, res) => {
     });
   } catch (error) {
     console.error('Error in getPendingApprovals:', error);
-    res.status(500).json({ 
-      error: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-    });
-  }
-};
-
-// Get notification count for header/badge
-exports.getNotificationCount = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    
-    console.log('Getting notification count for user:', userId);
-    
-    const user = await User.findById(userId).select('notifications pendingApprovals');
-    
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
-    }
-    
-    const unreadNotifications = (user.notifications || []).filter(n => !n.isRead).length;
-    const pendingApprovals = (user.pendingApprovals || []).length;
-    
-    console.log(`User ${userId} has ${unreadNotifications} unread notifications and ${pendingApprovals} pending approvals`);
-    
-    res.json({
-      unreadNotifications,
-      pendingApprovals,
-      total: unreadNotifications + pendingApprovals
-    });
-  } catch (error) {
-    console.error('Error in getNotificationCount:', error);
     res.status(500).json({ 
       error: error.message,
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
@@ -1149,5 +1059,87 @@ exports.getRequiredDocuments = async (req, res) => {
   } catch (error) {
     console.error('Error getting required documents:', error);
     res.status(500).json({ error: error.message });
+  }
+};
+
+// Delete contract (only if not approved yet)
+exports.deleteContract = async (req, res) => {
+  try {
+    const { contractId } = req.params;
+    const userId = req.user.id;
+    
+    console.log(`User ${userId} attempting to delete contract ${contractId}`);
+    
+    // Find the contract
+    const contract = await Contract.findById(contractId);
+    
+    if (!contract) {
+      return res.status(404).json({ error: 'Contract not found' });
+    }
+    
+    // Check if user owns this contract
+    if (!contract.userID.equals(userId)) {
+      return res.status(403).json({ error: 'You can only delete your own contracts' });
+    }
+    
+    // Check if contract can be deleted (not approved yet)
+    const deletableStatuses = [
+      'pending_sponsor_approval',
+      'pending_document_approval', 
+      'pending',
+      'pending_processing',
+      'rejected',
+      'pending_document_upload',
+      'queued_next_month'
+    ];
+    
+    if (!deletableStatuses.includes(contract.status)) {
+      return res.status(400).json({ 
+        error: 'Contract cannot be deleted',
+        details: `Contracts with status '${contract.status}' cannot be deleted. Only contracts that haven't been approved yet can be deleted.`,
+        currentStatus: contract.status,
+        deletableStatuses
+      });
+    }
+    
+    // Remove contract from sponsors' pending approvals and notifications
+    await Promise.all([
+      User.findByIdAndUpdate(contract.sponsorID_1, {
+        $pull: { 
+          pendingApprovals: { contractId: contract._id },
+          notifications: { contractId: contract._id }
+        }
+      }),
+      User.findByIdAndUpdate(contract.sponsorID_2, {
+        $pull: { 
+          pendingApprovals: { contractId: contract._id },
+          notifications: { contractId: contract._id }
+        }
+      }),
+      // Also remove notifications from the borrower
+      User.findByIdAndUpdate(contract.userID, {
+        $pull: { notifications: { contractId: contract._id } }
+      })
+    ]);
+    
+    // Delete any uploaded documents for this contract
+    await additionalDocumentModel.deleteMany({ contractID: contract._id });
+    
+    // Delete the contract
+    await Contract.findByIdAndDelete(contractId);
+    
+    console.log(`Contract ${contractId} successfully deleted by user ${userId}`);
+    
+    res.json({ 
+      message: 'Contract deleted successfully',
+      contractId: contractId,
+      deletedAt: new Date()
+    });
+  } catch (error) {
+    console.error('Error deleting contract:', error);
+    res.status(500).json({ 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 };

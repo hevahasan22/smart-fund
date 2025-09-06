@@ -24,35 +24,10 @@ const express = require('express');
        contractController.rejectContractAsSponsor
      );
 
-     // Notification endpoints
-     router.get(
-       '/notifications',
-       authenticate,
-       contractController.getUserNotifications
-     );
-
-     router.post(
-       '/notifications/:notificationId/read',
-       authenticate,
-       contractController.markNotificationAsRead
-     );
-
-     router.post(
-       '/notifications/read-all',
-       authenticate,
-       contractController.markAllNotificationsAsRead
-     );
-
      router.get(
        '/pending-approvals',
        authenticate,
        contractController.getPendingApprovals
-     );
-
-     router.get(
-       '/notification-count',
-       authenticate,
-       contractController.getNotificationCount
      );
 
      // Admin endpoint to trigger contract processing
@@ -75,15 +50,22 @@ const express = require('express');
        contractController.getRequiredDocuments
      );
 
-     // Get user contracts that are still not approved
-     router.get(
-       '/pending-contracts',
-       authenticate,
-       contractController.getUserPendingContracts
-     );
+    // Get user contracts that are still not approved
+    router.get(
+      '/pending-contracts',
+      authenticate,
+      contractController.getUserPendingContracts
+    );
 
-    /*
- 
-    */
+    // Delete contract (only if not approved yet)
+    router.delete(
+      '/:contractId',
+      authenticate,
+      contractController.deleteContract
+    );
 
-     module.exports = router;
+   /*
+
+   */
+
+    module.exports = router;

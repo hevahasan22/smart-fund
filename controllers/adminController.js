@@ -1977,10 +1977,10 @@ exports.getBorrowersWithLatePayments = async (req, res) => {
             email: '$user.email'
           },
           metrics: {
-            latePaymentsCount: 1,
-            totalOverdueAmount: 1,
-            oldestDueDate: 1,
-            latestDueDate: 1
+            latePaymentsCount: '$latePaymentsCount',
+            totalOverdueAmount: '$totalOverdueAmount',
+            oldestDueDate: '$oldestDueDate',
+            latestDueDate: '$latestDueDate'
           }
         }
       }
