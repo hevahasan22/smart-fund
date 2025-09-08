@@ -220,7 +220,7 @@ exports.visitAndPay = async (req, res) => {
     }
 
     // Use environment variable for frontend URL, fallback to localhost for development
-    const frontendUrl = process.env.FRONTEND_URL || 'http://192.168.245.118:3001';
+    const frontendUrl = process.env.FRONTEND_URL || 'http://192.168.62.118:3001';
     return res.redirect(`${frontendUrl}/payment-success/${paymentId}`);
   } catch (error) {
     console.error('QR visit error:', error);

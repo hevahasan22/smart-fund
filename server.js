@@ -86,24 +86,38 @@ const apiRoutes =require ('./routes/api')
 app.use('/api',apiRoutes)
 
 // Chat endpoint
-app.post("/api/chat", async (req, res) => {
+app.post("/chat", async (req, res) => {
   try {
     const { message } = req.body;
     if (!message || typeof message !== 'string' || message.trim().length === 0) {
-      return res.status(400).json({ error: 'message is required and must be a non-empty string' });
+      return res.status(400).json({
+        error: "Message is required",
+        detail: { error: "Message is required" }
+      });
     }
 
-    const flaskRes = await axios.post("http://localhost:5000/chat", {
-      prompt: message,
+    // Send the correct key to Flask
+    const flaskRes = await axios.post("http://127.0.0.1:5000/chat", {
+      message: message,
     });
-    res.json({ answer: flaskRes.data.response });
+
+    // Match the Flask server's response structure
+    res.json({ answer: flaskRes.data.answer, sources: flaskRes.data.sources });
   } catch (err) {
     const status = err.response?.status || 500;
-    const data = err.response?.data;
-    console.error('Chat proxy error:', { message: err.message, status, data });
-    res.status(500).json({ error: err.message, detail: data });
+    const errorMessage = err.response?.data?.error || err.message;
+    console.error('Chat proxy error:', { 
+      message: err.message, 
+      status, 
+      data: err.response?.data 
+    });
+    res.status(status).json({
+      error: errorMessage,
+      detail: { error: errorMessage }
+    });
   }
 });
+
 
 // require middleware
 const errorHandler=require('./middleware/errorHandler')
