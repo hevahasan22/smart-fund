@@ -4,7 +4,7 @@ const Joi = require('joi');
 const contractSchema = new mongoose.Schema({
     status: { 
        type: String, 
-       enum: ['pending_sponsor_approval', 'pending_document_approval', 'pending', 'pending_processing', 'approved', 'rejected', 'active', 'completed','pending_document_upload', 'queued_next_month'], 
+       enum: ['pending_sponsor_approval', 'pending_document_approval', 'pending', 'pending_processing', 'approved', 'rejected', 'active', 'completed','pending_document_upload', 'pending_document_reupload', 'queued_next_month'], 
        default: 'pending' 
     },
     employmentStatus: {

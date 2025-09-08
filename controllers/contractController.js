@@ -727,11 +727,17 @@ const processSingleContract = async (contract) => {
         return !doc || doc.status !== 'approved';
       });
       
-      // Update contract status to wait for document approval
-      if (contract.status !== 'pending_document_approval') {
-        contract.status = 'pending_document_approval';
+      // Update contract status to wait for document approval or re-upload
+      if (contract.status !== 'pending_document_approval' && contract.status !== 'pending_document_reupload') {
+        // Check if there are any rejected documents that need re-upload
+        const hasRejectedDocs = documents.some(doc => doc.status === 'rejected');
+        if (hasRejectedDocs) {
+          contract.status = 'pending_document_reupload';
+        } else {
+          contract.status = 'pending_document_approval';
+        }
         await contract.save();
-        console.log(`Contract ${contract._id} status updated to pending_document_approval`);
+        console.log(`Contract ${contract._id} status updated to ${contract.status}`);
       }
       
       console.log(`Waiting for admin approval of documents: ${pendingDocs.map(d => d.documentName).join(', ')}`);
@@ -1062,6 +1068,365 @@ exports.getRequiredDocuments = async (req, res) => {
   }
 };
 
+// Edit contract (only if not approved yet)
+exports.editContract = async (req, res) => {
+  try {
+    const { contractId } = req.params;
+    const userId = req.user.id;
+    
+    console.log(`User ${userId} attempting to edit contract ${contractId}`);
+    
+    // Parse form data
+    const files = req.files || [];
+    const body = req.body;
+
+    const { 
+      loanType, 
+      loanTerm, 
+      loanAmount, 
+      loanTermMonths, 
+      employmentStatus, 
+      sponsorEmail1, 
+      sponsorEmail2,
+    } = body;
+    
+    // Find the contract
+    const contract = await Contract.findById(contractId);
+    
+    if (!contract) {
+      return res.status(404).json({ error: 'Contract not found' });
+    }
+    
+    // Check if user owns this contract
+    if (!contract.userID.equals(userId)) {
+      return res.status(403).json({ error: 'You can only edit your own contracts' });
+    }
+    
+    // Check if contract can be edited (not approved yet)
+    const editableStatuses = [
+      'pending_sponsor_approval',
+      'pending_document_approval', 
+      'pending',
+      'pending_processing',
+      'rejected',
+      'pending_document_upload',
+      'pending_document_reupload',
+      'queued_next_month'
+    ];
+    
+    if (!editableStatuses.includes(contract.status)) {
+      return res.status(400).json({ 
+        error: 'Contract cannot be edited',
+        details: `Contracts with status '${contract.status}' cannot be edited. Only contracts that haven't been approved yet can be edited.`,
+        currentStatus: contract.status,
+        editableStatuses
+      });
+    }
+
+    // Input validation
+    if (!loanType || !loanTerm || !loanAmount || !loanTermMonths || !employmentStatus || !sponsorEmail1 || !sponsorEmail2) {
+      return res.status(400).json({ 
+        error: 'Missing required fields',
+        required: ['loanType', 'loanTerm', 'loanAmount', 'loanTermMonths', 'employmentStatus', 'sponsorEmail1', 'sponsorEmail2']
+      });
+    }
+
+    // Validate numeric fields
+    if (isNaN(loanAmount) || loanAmount <= 0) {
+      return res.status(400).json({ error: 'Invalid loan amount' });
+    }
+
+    if (isNaN(loanTermMonths) || loanTermMonths <= 0) {
+      return res.status(400).json({ error: 'Invalid loan term months' });
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(sponsorEmail1) || !emailRegex.test(sponsorEmail2)) {
+      return res.status(400).json({ error: 'Invalid email format for sponsors' });
+    }
+
+    // Check if sponsors are the same
+    if (sponsorEmail1 === sponsorEmail2) {
+      return res.status(400).json({ error: 'Sponsors must be different individuals' });
+    }
+
+    // Check if user is trying to sponsor themselves
+    const user = await User.findById(userId);
+    if (user.email === sponsorEmail1 || user.email === sponsorEmail2) {
+      return res.status(400).json({ error: 'You cannot be your own sponsor' });
+    }
+
+    // 1. Find loan type by name
+    const loanTypeRecord = await loanTypeModel.findOne({ loanName: loanType });
+    if (!loanTypeRecord) {
+      return res.status(400).json({ 
+        error: 'Invalid loan type',
+        validTypes: await loanTypeModel.find().distinct('loanName')
+      });
+    }
+
+    // 2. Find loan term by type
+    const loanTermRecord = await loanTermModel.findOne({ type: loanTerm });
+    if (!loanTermRecord) {
+      return res.status(400).json({ 
+        error: 'Invalid loan term',
+        validTerms: await loanTermModel.find().distinct('type')
+      });
+    }
+
+    // 3. Find typeTerm that matches both loan type and term
+    const typeTerm = await typetermModel.findOne({
+      loanTypeID: loanTypeRecord._id,
+      loanTermID: loanTermRecord._id
+    })
+      .populate('loanTypeID')
+      .populate('loanTermID');
+
+    if (!typeTerm) {
+      return res.status(400).json({ 
+        error: 'No loan product found for this type and term combination',
+        validCombinations: await getValidTypeTermCombinations()
+      });
+    }
+
+    // 4. Validate loan parameters
+    if (loanAmount < typeTerm.minAmount || 
+        loanAmount > typeTerm.maxAmount) {
+      return res.status(400).json({ 
+        error: `Loan amount must be between ${typeTerm.minAmount} and ${typeTerm.maxAmount}`,
+        minAmount: typeTerm.minAmount,
+        maxAmount: typeTerm.maxAmount
+      });
+    }
+
+    if (loanTermMonths < loanTermRecord.minTerm || 
+        loanTermMonths > loanTermRecord.maxTerm) {
+      return res.status(400).json({ 
+        error: `Loan term must be between ${loanTermRecord.minTerm} and ${loanTermRecord.maxTerm} months`,
+        minTerm: loanTermRecord.minTerm,
+        maxTerm: loanTermRecord.maxTerm
+      });
+    }
+
+    // 5. Find sponsors by email
+    const [sponsor1, sponsor2] = await Promise.all([
+      User.findOne({ email: sponsorEmail1 }),
+      User.findOne({ email: sponsorEmail2 })
+    ]);
+    
+    if (!sponsor1 || !sponsor2) {
+      const missingSponsors = [];
+      if (!sponsor1) missingSponsors.push(sponsorEmail1);
+      if (!sponsor2) missingSponsors.push(sponsorEmail2);
+      
+      return res.status(400).json({ 
+        error: 'One or both sponsors not found',
+        missingSponsors
+      });
+    }
+    
+    // 6. Validate sponsor eligibility
+    const ineligibleSponsors = [];
+    if (sponsor1.status !== 'eligible') ineligibleSponsors.push(sponsorEmail1);
+    if (sponsor2.status !== 'eligible') ineligibleSponsors.push(sponsorEmail2);
+    
+    if (ineligibleSponsors.length > 0) {
+      return res.status(400).json({ 
+        error: 'One or both sponsors are not eligible',
+        ineligibleSponsors
+      });
+    }
+
+    // 7. Check if sponsors have active loans (borrowers with active loans cannot be sponsors)
+    const [sponsor1ActiveLoans, sponsor2ActiveLoans] = await Promise.all([
+      Contract.countDocuments({
+        userID: sponsor1._id,
+        status: { $in: ['approved', 'active'] }
+      }),
+      Contract.countDocuments({
+        userID: sponsor2._id,
+        status: { $in: ['approved', 'active'] }
+      })
+    ]);
+    
+    const sponsorsWithActiveLoans = [];
+    if (sponsor1ActiveLoans > 0) sponsorsWithActiveLoans.push(sponsorEmail1);
+    if (sponsor2ActiveLoans > 0) sponsorsWithActiveLoans.push(sponsorEmail2);
+    
+    if (sponsorsWithActiveLoans.length > 0) {
+      return res.status(400).json({ 
+        error: 'One or both sponsors have active loans and cannot sponsor other loans',
+        sponsorsWithActiveLoans,
+        details: 'Borrowers with active (uncompleted) loans cannot be sponsors for other loans until their current loan is completed'
+      });
+    }
+
+    // 8. Check if sponsors are trying to sponsor their own contract (self-sponsorship prevention)
+    const selfSponsorshipAttempts = [];
+    if (sponsor1._id.equals(userId)) selfSponsorshipAttempts.push(sponsorEmail1);
+    if (sponsor2._id.equals(userId)) selfSponsorshipAttempts.push(sponsorEmail2);
+    
+    if (selfSponsorshipAttempts.length > 0) {
+      return res.status(400).json({ 
+        error: 'You cannot be your own sponsor',
+        selfSponsorshipAttempts,
+        details: 'Borrowers cannot sponsor their own loan contracts'
+      });
+    }
+
+    // 9. Check total sponsor limit (maximum 2 loans ever, across all loan types)
+    // Exclude current contract from the count
+    const [sponsor1TotalCount, sponsor2TotalCount] = await Promise.all([
+      Contract.countDocuments({
+        $or: [{ sponsorID_1: sponsor1._id }, { sponsorID_2: sponsor1._id }],
+        status: { $in: ['approved', 'active'] },
+        _id: { $ne: contract._id } // Exclude current contract
+      }),
+      Contract.countDocuments({
+        $or: [{ sponsorID_1: sponsor2._id }, { sponsorID_2: sponsor2._id }],
+        status: { $in: ['approved', 'active'] },
+        _id: { $ne: contract._id } // Exclude current contract
+      })
+    ]);
+    
+    const sponsorsAtLimit = [];
+    if (sponsor1TotalCount >= 2) sponsorsAtLimit.push(sponsorEmail1);
+    if (sponsor2TotalCount >= 2) sponsorsAtLimit.push(sponsorEmail2);
+    
+    if (sponsorsAtLimit.length > 0) {
+      return res.status(400).json({
+        error: 'One or both sponsors have reached their maximum sponsorship limit (2 loans)',
+        sponsorsAtLimit,
+        details: 'Sponsors can only sponsor a maximum of 2 loans across all loan types'
+      });
+    }
+
+    // Store old sponsor IDs for cleanup
+    const oldSponsor1Id = contract.sponsorID_1;
+    const oldSponsor2Id = contract.sponsorID_2;
+    const sponsorsChanged = !oldSponsor1Id.equals(sponsor1._id) || !oldSponsor2Id.equals(sponsor2._id);
+
+    // 10. Get required document types using junction table
+    const requiredDocTypeRelations = await documentTypeTermRelationModel.find({
+      typeTermID: typeTerm._id,
+      isRequired: true
+    }).populate('documentTypeID');
+
+    const requiredDocTypes = requiredDocTypeRelations.map(relation => ({
+      _id: relation.documentTypeID._id,
+      documentName: relation.documentTypeID.documentName,
+      description: relation.documentTypeID.description,
+      isRequired: relation.isRequired
+    }));
+
+    console.log(`Found ${requiredDocTypes.length} required document types for this loan type`);
+
+    // 11. Update contract fields
+    contract.sponsorID_1 = sponsor1._id;
+    contract.sponsorID_2 = sponsor2._id;
+    contract.typeTermID = typeTerm._id;
+    contract.tempLoanAmount = loanAmount;
+    contract.tempLoanTermMonths = loanTermMonths;
+    contract.tempStartDate = new Date();
+    contract.employmentStatus = employmentStatus;
+    contract.priority = loanTypeRecord.priority;
+    
+    // Reset sponsor approvals if sponsors changed
+    if (sponsorsChanged) {
+      contract.sponsor1Approved = false;
+      contract.sponsor2Approved = false;
+      contract.status = 'pending_sponsor_approval';
+    }
+
+    // Set status based on document requirements
+    if (requiredDocTypes.length > 0 && contract.status !== 'pending_sponsor_approval') {
+      contract.status = 'pending_document_upload';
+    }
+
+    await contract.save();
+
+    // 12. Handle sponsor changes - cleanup old sponsors and notify new ones
+    if (sponsorsChanged) {
+      // Remove from old sponsors' pending approvals
+      await Promise.all([
+        User.findByIdAndUpdate(oldSponsor1Id, {
+          $pull: { pendingApprovals: { contractId: contract._id } }
+        }),
+        User.findByIdAndUpdate(oldSponsor2Id, {
+          $pull: { pendingApprovals: { contractId: contract._id } }
+        })
+      ]);
+
+      // Add to new sponsors' pending approvals
+      await Promise.all([
+        User.findByIdAndUpdate(sponsor1._id, {
+          $push: {
+            pendingApprovals: {
+              contractId: contract._id,
+              borrowerId: userId,
+              requestedAt: new Date()
+            }
+          }
+        }),
+        User.findByIdAndUpdate(sponsor2._id, {
+          $push: {
+            pendingApprovals: {
+              contractId: contract._id,
+              borrowerId: userId,
+              requestedAt: new Date()
+            }
+          }
+        })
+      ]);
+
+      // Notify new sponsors about sponsorship request
+      await Promise.all([
+        notificationService.sendSponsorshipRequestNotification(sponsor1._id, userId, contract._id),
+        notificationService.sendSponsorshipRequestNotification(sponsor2._id, userId, contract._id)
+      ]);
+
+      // Notify old sponsors about contract update (if they're different)
+      if (!oldSponsor1Id.equals(sponsor1._id)) {
+        await notificationService.sendContractUpdateNotification(oldSponsor1Id, userId, contract._id, 'sponsor_removed');
+      }
+      if (!oldSponsor2Id.equals(sponsor2._id)) {
+        await notificationService.sendContractUpdateNotification(oldSponsor2Id, userId, contract._id, 'sponsor_removed');
+      }
+    }
+
+    // 13. Notify borrower about contract update
+    await notificationService.sendContractUpdateNotification(userId, userId, contract._id, 'contract_updated');
+
+    // 14. Return response based on status
+    if (requiredDocTypes.length > 0 && contract.status === 'pending_document_upload') {
+      return res.status(200).json({
+        message: 'Contract updated successfully. Please upload required documents.',
+        contractId: contract._id,
+        contract: contractToUserView(contract),
+        requiredDocuments: requiredDocTypes.map(dt => ({
+          id: dt._id,
+          name: dt.documentName,
+          description: dt.description || 'Required document'
+        })),
+        nextStep: 'Upload all required documents using the provided contract ID.'
+      });
+    } else {
+      return res.status(200).json({
+        message: 'Contract updated successfully. Waiting for sponsor approvals.',
+        contract: contractToUserView(contract),
+        documents: []
+      });
+    }
+  } catch (error) {
+    console.error('Error editing contract:', error);
+    res.status(500).json({ 
+      error: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+};
+
 // Delete contract (only if not approved yet)
 exports.deleteContract = async (req, res) => {
   try {
@@ -1090,6 +1455,7 @@ exports.deleteContract = async (req, res) => {
       'pending_processing',
       'rejected',
       'pending_document_upload',
+      'pending_document_reupload',
       'queued_next_month'
     ];
     

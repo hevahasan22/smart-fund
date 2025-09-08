@@ -57,6 +57,13 @@ const express = require('express');
       contractController.getUserPendingContracts
     );
 
+    // Edit contract (only if not approved yet)
+    router.put(
+      '/:contractId',
+      authenticate,
+      contractController.editContract
+    );
+
     // Delete contract (only if not approved yet)
     router.delete(
       '/:contractId',

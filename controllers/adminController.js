@@ -742,9 +742,27 @@ exports.reviewDocument = async (req, res) => {
       }
     }
     
-    // Check if all required documents for this contract are now approved
+    // Handle contract status based on document review result
     if (status === 'approved') {
+      // Check if all required documents for this contract are now approved
       await checkContractDocumentCompletion(document.contractID);
+    } else if (status === 'rejected') {
+      // When a document is rejected, set contract to pending_document_reupload
+      // This allows the user to re-upload the rejected document
+      const contract = await Contract.findById(document.contractID);
+      if (contract && contract.status === 'pending_document_approval') {
+        contract.status = 'pending_document_reupload';
+        await contract.save();
+        console.log(`Contract ${document.contractID} status updated to pending_document_reupload due to document rejection`);
+        
+        // Notify user that they need to re-upload the rejected document
+        await notificationService.sendDocumentRejectionRequiresReuploadNotification(
+          document.uploadedBy._id,
+          document.contractID,
+          document.typeID.documentName,
+          rejectionReason
+        );
+      }
     }
     
     res.json({
@@ -806,7 +824,7 @@ const checkContractDocumentCompletion = async (contractId) => {
     if (allApproved) {
       console.log(`All documents approved for contract ${contractId}, triggering sponsor approval requests`);
       // Update contract status to pending_sponsor_approval if it was waiting for documents
-      if (contract.status === 'pending_document_upload' || contract.status === 'pending_document_approval') {
+      if (contract.status === 'pending_document_upload' || contract.status === 'pending_document_approval' || contract.status === 'pending_document_reupload') {
         contract.status = 'pending_sponsor_approval';
         await contract.save();
         // Notify user that all documents are approved and contract is proceeding
@@ -856,7 +874,7 @@ const checkContractDocumentCompletion = async (contractId) => {
       }
     } else {
       // If not all approved, but all required docs are uploaded, set status to pending_document_approval
-      if (contract.status === 'pending_document_upload') {
+      if (contract.status === 'pending_document_upload' || contract.status === 'pending_document_reupload') {
         contract.status = 'pending_document_approval';
         await contract.save();
       }
@@ -1206,12 +1224,29 @@ exports.getDashboardStats = async (req, res) => {
     const [pendingContracts, activeContracts, completedContracts] = await Promise.all([
       Contract.countDocuments({ 
         status: { 
-          $in: ['pending', 'pending_sponsor_approval', 'pending_document_approval', 'pending_processing', 'pending_document_upload'] 
+          $in: ['pending', 'pending_sponsor_approval', 'pending_document_approval', 'pending_processing', 'pending_document_upload', 'pending_document_reupload'] 
         } 
       }),
       Contract.countDocuments({ status: 'active' }),
       Contract.countDocuments({ status: 'completed' })
     ]);
+
+    // Calculate total funded amount from active and completed loans
+    const totalFundedAmount = await Loan.aggregate([
+      {
+        $match: {
+          status: { $in: ['active', 'completed'] }
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalAmount: { $sum: '$loanAmount' }
+        }
+      }
+    ]);
+
+    const fundedAmount = totalFundedAmount.length > 0 ? totalFundedAmount[0].totalAmount : 0;
     
     // Get recent activity (last 30 days)
     const thirtyDaysAgo = new Date();
@@ -1254,7 +1289,7 @@ exports.getDashboardStats = async (req, res) => {
         }),
         Contract.countDocuments({
           createdAt: { $gte: monthDate, $lt: nextMonthDate },
-          status: { $in: ['pending', 'pending_sponsor_approval', 'pending_document_approval', 'pending_processing', 'pending_document_upload'] }
+          status: { $in: ['pending', 'pending_sponsor_approval', 'pending_document_approval', 'pending_processing', 'pending_document_upload', 'pending_document_reupload'] }
         }),
         Contract.countDocuments({
           createdAt: { $gte: monthDate, $lt: nextMonthDate },
@@ -1271,7 +1306,7 @@ exports.getDashboardStats = async (req, res) => {
       });
     }
     
-    console.log(`Dashboard stats calculated - Users: ${totalUsers}, Contracts: ${totalContracts}, Approved: ${approvedContracts}, Rejected: ${rejectedContracts}`);
+    console.log(`Dashboard stats calculated - Users: ${totalUsers}, Contracts: ${totalContracts}, Approved: ${approvedContracts}, Rejected: ${rejectedContracts}, Total Funded: ${fundedAmount}`);
     
     res.json({
       success: true,
@@ -1291,7 +1326,8 @@ exports.getDashboardStats = async (req, res) => {
         },
         loans: {
           total: approvedContracts + activeContracts, // Total approved loans
-          recent: recentApprovals
+          recent: recentApprovals,
+          totalFundedAmount: fundedAmount
         },
         recentActivity: {
           approvals: recentApprovals,

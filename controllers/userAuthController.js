@@ -175,6 +175,29 @@ exports.login = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid email or password' });
     }
 
+    // Check for active contracts as borrower or sponsor
+    const { Contract } = require('../models/contract');
+    
+    // Find contracts where user is the borrower (userID)
+    const borrowerContracts = await Contract.find({
+      userID: user._id,
+      status: { $in: ['active', 'pending_sponsor_approval', 'pending_document_approval', 'pending_document_upload', 'pending_document_reupload', 'pending_processing', 'approved'] }
+    });
+
+    // Find contracts where user is a sponsor (sponsorID_1 or sponsorID_2)
+    const sponsorContracts = await Contract.find({
+      $or: [
+        { sponsorID_1: user._id },
+        { sponsorID_2: user._id }
+      ],
+      status: { $in: ['active', 'pending_sponsor_approval', 'pending_document_approval', 'pending_document_upload', 'pending_document_reupload', 'pending_processing', 'approved'] }
+    });
+
+    // Determine contract status
+    const hasActiveContractAsBorrower = borrowerContracts.length > 0;
+    const hasActiveContractAsSponsor = sponsorContracts.length > 0;
+    const hasAnyActiveContract = hasActiveContractAsBorrower || hasActiveContractAsSponsor;
+
     // Generate JWT
    const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET);
 
@@ -189,6 +212,13 @@ exports.login = async (req, res) => {
         fullName: `${user.userFirstName} ${user.userLastName}`,
         role: user.role,
         profilePhoto: user.profilePhoto,
+        contractStatus: {
+          hasActiveContract: hasAnyActiveContract,
+          hasActiveContractAsBorrower: hasActiveContractAsBorrower,
+          hasActiveContractAsSponsor: hasActiveContractAsSponsor,
+          borrowerContractCount: borrowerContracts.length,
+          sponsorContractCount: sponsorContracts.length
+        }
       },
     });
   } catch (error) {

@@ -31,11 +31,19 @@ async function sendDocumentRejectionNotification(userId, documentId, documentNam
 
 async function sendDocumentPendingReview(documentId) {
   const admins = await User.find({ role: 'admin' });
-  const message = `New document uploaded and pending review (ID: ${documentId})`;
+  
+  // Get document details to fetch document type name
+  const { additionalDocumentModel } = require('../../models/additionalDocument');
+  const document = await additionalDocumentModel.findById(documentId).populate('typeID');
+  
+  const documentTypeName = document && document.typeID ? document.typeID.documentName : 'Unknown Document Type';
+  
+  const message = `New document "${documentTypeName}" uploaded and pending review`;
   const emailSubject = 'Document Pending Review';
   const emailHtml = `
     <p>Hello Admin,</p>
     <p>A new document has been uploaded and is pending your review.</p>
+    <p><strong>Document Type:</strong> ${documentTypeName}</p>
     <p><strong>Document ID:</strong> ${documentId}</p>
     <p>Please log in to the admin panel to review this document.</p>
     <p>Best regards,<br>Smart Fund Team</p>
@@ -60,9 +68,25 @@ async function sendContractDocumentCompletionNotification(userId, contractId) {
   await sendEmail(userId, emailSubject, emailHtml);
 }
 
+async function sendDocumentRejectionRequiresReuploadNotification(userId, contractId, documentName, rejectionReason) {
+  const message = `Your document "${documentName}" has been rejected and needs to be re-uploaded. Reason: ${rejectionReason}`;
+  const emailSubject = 'Document Rejected - Re-upload Required';
+  const emailHtml = `
+    <p>Hello,</p>
+    <p>Your document "${documentName}" has been rejected by our admin team and needs to be re-uploaded.</p>
+    <p><strong>Rejection Reason:</strong> ${rejectionReason}</p>
+    <p>Please review the requirements and upload a corrected version of this document. Your contract will remain active while you re-upload the document.</p>
+    <p>You can re-upload the document by logging into your account and going to your contract details.</p>
+    <p>Best regards,<br>Smart Fund Team</p>
+  `;
+  await createInAppNotification(userId, 'document_rejection_reupload', message, contractId);
+  await sendEmail(userId, emailSubject, emailHtml);
+}
+
 module.exports = {
   sendDocumentApprovalNotification,
   sendDocumentRejectionNotification,
   sendDocumentPendingReview,
-  sendContractDocumentCompletionNotification
+  sendContractDocumentCompletionNotification,
+  sendDocumentRejectionRequiresReuploadNotification
 }; 

@@ -123,11 +123,76 @@ async function sendContractRejectionNotification(borrowerId, contractId, reason)
   await sendEmail(borrowerId, emailSubject, emailHtml);
 }
 
+async function sendContractUpdateNotification(userId, borrowerId, contractId, updateType) {
+  const details = await getContractDetails(contractId);
+  const borrower = await User.findById(borrowerId);
+  const borrowerName = borrower ? `${borrower.userFirstName} ${borrower.userLastName}` : 'Unknown';
+  
+  let message = '';
+  let emailSubject = '';
+  let emailHtml = '';
+  
+  switch (updateType) {
+    case 'contract_updated':
+      message = `Your contract for ${details.loanType} (${details.term} months) has been updated successfully.`;
+      emailSubject = 'Contract Updated';
+      emailHtml = `
+        <p>Hello,</p>
+        <p>Your loan contract has been successfully updated!</p>
+        <p><strong>Updated Loan Details:</strong></p>
+        <ul>
+          <li>Loan Type: ${details.loanType}</li>
+          <li>Amount: $${details.amount}</li>
+          <li>Term: ${details.term} months</li>
+        </ul>
+        <p>Please log in to view the updated contract details.</p>
+        <p>Best regards,<br>Smart Fund Team</p>
+      `;
+      break;
+      
+    case 'sponsor_removed':
+      message = `You have been removed as a sponsor for ${borrowerName}'s ${details.loanType} loan application.`;
+      emailSubject = 'Sponsorship Removed';
+      emailHtml = `
+        <p>Hello,</p>
+        <p>You have been removed as a sponsor for the following loan application:</p>
+        <ul>
+          <li>Borrower: ${borrowerName}</li>
+          <li>Loan Type: ${details.loanType}</li>
+          <li>Amount: $${details.amount}</li>
+          <li>Term: ${details.term} months</li>
+        </ul>
+        <p>You no longer need to take any action on this application.</p>
+        <p>Best regards,<br>Smart Fund Team</p>
+      `;
+      break;
+      
+    default:
+      message = `Contract update: ${details.loanType} (${details.term} months)`;
+      emailSubject = 'Contract Update';
+      emailHtml = `
+        <p>Hello,</p>
+        <p>There has been an update to a loan contract:</p>
+        <ul>
+          <li>Loan Type: ${details.loanType}</li>
+          <li>Amount: $${details.amount}</li>
+          <li>Term: ${details.term} months</li>
+        </ul>
+        <p>Please log in to view the updated details.</p>
+        <p>Best regards,<br>Smart Fund Team</p>
+      `;
+  }
+
+  await createInAppNotification(userId, 'contract_update', message, contractId);
+  await sendEmail(userId, emailSubject, emailHtml);
+}
+
 module.exports = {
   getContractDetails,
   sendContractSubmissionNotification,
   sendNewApplicationNotification,
   sendContractActivationNotification,
   sendAdminActivationNotification,
-  sendContractRejectionNotification
+  sendContractRejectionNotification,
+  sendContractUpdateNotification
 }; 

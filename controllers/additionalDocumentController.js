@@ -46,7 +46,7 @@ exports.uploadDocument = async (req, res) => {
     }
     
     // Check if contract is in a state where documents can be uploaded
-    if (!['pending_sponsor_approval', 'pending_processing', 'pending_document_approval','pending','pending_document_upload'].includes(contract.status)) {
+    if (!['pending_sponsor_approval', 'pending_processing', 'pending_document_approval','pending','pending_document_upload', 'pending_document_reupload'].includes(contract.status)) {
       return res.status(400).json({ 
         error: 'Documents cannot be uploaded at this stage',
         currentStatus: contract.status
@@ -68,6 +68,7 @@ exports.uploadDocument = async (req, res) => {
     console.log(`Document upload request - Contract: ${contractID}, Type: ${typeID}, User: ${userId}`);
     
     // Check if document already exists for this type and contract
+    // Allow re-upload if the existing document is rejected
     const existingDoc = await additionalDocumentModel.findOne({
       contractID,
       typeID,
@@ -77,8 +78,22 @@ exports.uploadDocument = async (req, res) => {
     if (existingDoc) {
       return res.status(400).json({ 
         error: 'Document of this type already exists for this contract',
-        existingDocument: existingDoc._id
+        existingDocument: existingDoc._id,
+        message: 'You can only re-upload rejected documents. Please delete the rejected document first or contact support.'
       });
+    }
+
+    // Check if there's a rejected document of this type that can be replaced
+    const rejectedDoc = await additionalDocumentModel.findOne({
+      contractID,
+      typeID,
+      status: 'rejected'
+    });
+
+    let documentToUpdate = null;
+    if (rejectedDoc) {
+      console.log(`Found rejected document ${rejectedDoc._id} for type ${typeID}, will replace it`);
+      documentToUpdate = rejectedDoc;
     }
     
     // Upload to Cloudinary
@@ -93,19 +108,52 @@ exports.uploadDocument = async (req, res) => {
       ).end(file.buffer);
     });
     
-    // Create document record
-    const document = new additionalDocumentModel({
-      typeID,
-      contractID,
-      documentFile: {
+    let document;
+    if (documentToUpdate) {
+      // Update existing rejected document
+      console.log(`Updating rejected document ${documentToUpdate._id}`);
+      
+      // Delete old file from Cloudinary if it exists
+      if (documentToUpdate.documentFile && documentToUpdate.documentFile.public_id) {
+        try {
+          await cloudinary.uploader.destroy(documentToUpdate.documentFile.public_id);
+          console.log(`Deleted old file from Cloudinary: ${documentToUpdate.documentFile.public_id}`);
+        } catch (cloudinaryError) {
+          console.error('Error deleting old file from Cloudinary:', cloudinaryError);
+          // Continue with update even if Cloudinary deletion fails
+        }
+      }
+      
+      // Update the document
+      documentToUpdate.documentFile = {
         url: result.secure_url,
         public_id: result.public_id
-      },
-      uploadedBy: userId,
-      status: 'pending'
-    });
-    
-    await document.save();
+      };
+      documentToUpdate.uploadedBy = userId;
+      documentToUpdate.status = 'pending';
+      documentToUpdate.rejectionReason = undefined; // Clear rejection reason
+      documentToUpdate.adminNotes = undefined; // Clear admin notes
+      documentToUpdate.reviewedBy = undefined; // Clear reviewer
+      documentToUpdate.reviewedAt = undefined; // Clear review date
+      documentToUpdate.uploadedAt = new Date(); // Update upload date
+      
+      await documentToUpdate.save();
+      document = documentToUpdate;
+    } else {
+      // Create new document record
+      document = new additionalDocumentModel({
+        typeID,
+        contractID,
+        documentFile: {
+          url: result.secure_url,
+          public_id: result.public_id
+        },
+        uploadedBy: userId,
+        status: 'pending'
+      });
+      
+      await document.save();
+    }
 
     // After saving, check if all required documents are uploaded
     const requiredDocTypes = await documentTypeTermRelationModel.find({
@@ -122,9 +170,20 @@ exports.uploadDocument = async (req, res) => {
       uploadedDocs.some(doc => doc.typeID.equals(docType.documentTypeID._id))
     );
 
-    if (allUploaded && contract.status === 'pending_document_upload') {
-      contract.status = 'pending_document_approval';
-      await contract.save();
+    // Update contract status based on document upload
+    if (allUploaded) {
+      if (contract.status === 'pending_document_upload' || contract.status === 'pending_document_reupload') {
+        contract.status = 'pending_document_approval';
+        await contract.save();
+        console.log(`Contract ${contractID} status updated to pending_document_approval`);
+      }
+    } else {
+      // If not all documents uploaded, ensure contract is in correct status
+      if (contract.status === 'pending_document_approval') {
+        contract.status = 'pending_document_upload';
+        await contract.save();
+        console.log(`Contract ${contractID} status updated to pending_document_upload`);
+      }
     }
     
     console.log(`Document uploaded successfully: ${document._id}`);
@@ -132,13 +191,17 @@ exports.uploadDocument = async (req, res) => {
     // Notify admin about new document pending review
     await notificationService.sendDocumentPendingReview(document._id);
     
+    const isReupload = documentToUpdate !== null;
     res.status(201).json({
-      message: 'Document uploaded successfully and pending admin review',
+      message: isReupload 
+        ? 'Document re-uploaded successfully and pending admin review'
+        : 'Document uploaded successfully and pending admin review',
       document: {
         id: document._id,
         type: docType.documentName,
         status: document.status,
-        uploadedAt: document.uploadedAt
+        uploadedAt: document.uploadedAt,
+        isReupload: isReupload
       }
     });
   } catch (error) {

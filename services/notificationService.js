@@ -95,12 +95,14 @@ exports.sendContractActivationNotification = contracts.sendContractActivationNot
 exports.sendSponsorActivationNotification = sponsorships.sendSponsorActivationNotification;
 exports.sendAdminActivationNotification = contracts.sendAdminActivationNotification;
 exports.sendContractRejectionNotification = contracts.sendContractRejectionNotification;
+exports.sendContractUpdateNotification = contracts.sendContractUpdateNotification;
 
 // Documents
 exports.sendDocumentApprovalNotification = documents.sendDocumentApprovalNotification;
 exports.sendDocumentRejectionNotification = documents.sendDocumentRejectionNotification;
 exports.sendDocumentPendingReview = documents.sendDocumentPendingReview;
 exports.sendContractDocumentCompletionNotification = documents.sendContractDocumentCompletionNotification;
+exports.sendDocumentRejectionRequiresReuploadNotification = documents.sendDocumentRejectionRequiresReuploadNotification;
 
 // Sponsorships
 exports.sendSponsorshipRequestNotification = sponsorships.sendSponsorshipRequestNotification;
