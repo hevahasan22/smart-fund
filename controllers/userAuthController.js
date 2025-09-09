@@ -31,6 +31,23 @@ const generateVerificationCode = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
+// Cleanup old unverified accounts (older than 24 hours)
+const cleanupOldUnverifiedAccounts = async () => {
+  try {
+    const oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const result = await User.deleteMany({
+      isVerified: false,
+      createdAt: { $lt: oneDayAgo }
+    });
+    
+    if (result.deletedCount > 0) {
+      console.log(`Cleaned up ${result.deletedCount} old unverified accounts`);
+    }
+  } catch (error) {
+    console.error('Error cleaning up old unverified accounts:', error.message);
+  }
+};
+
 // Register a new user
 exports.register = async (req, res) => {
   const { error } = validateRegisterUser(req.body);
@@ -39,6 +56,8 @@ exports.register = async (req, res) => {
   }
 
   try {
+    // Cleanup old unverified accounts before processing new registration
+    await cleanupOldUnverifiedAccounts();
     const { email, password, userFirstName, userLastName, employmentStatus,phoneNumber,
       DateOfBirth,address,gender,income,creditID
      } = req.body;
@@ -46,7 +65,49 @@ exports.register = async (req, res) => {
     // Check if user exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
-      return res.status(400).json({ success: false, message: 'Email already registered' });
+      // If user exists and is verified, return error
+      if (existingUser.isVerified) {
+        return res.status(400).json({ success: false, message: 'Email already registered' });
+      }
+      
+      // If user exists but is unverified, resend verification code
+      const verificationCode = generateVerificationCode();
+      const verificationCodeExpires = new Date(Date.now() + 15 * 60 * 1000); // Expires in 15 minutes
+      
+      // Update existing unverified user with new verification code
+      existingUser.verificationCode = verificationCode;
+      existingUser.verificationCodeExpires = verificationCodeExpires;
+      existingUser.password = await bcrypt.hash(password, 12); // Update password in case they want to change it
+      
+      // Update other fields that might have changed
+      const allowedFields = ['userFirstName', 'userLastName', 'employmentStatus', 'phoneNumber', 'DateOfBirth', 'address', 'gender', 'income', 'creditID'];
+      allowedFields.forEach(field => {
+        if (req.body[field] !== undefined) {
+          existingUser[field] = req.body[field];
+        }
+      });
+      
+      await existingUser.save();
+      
+      // Send verification email
+      const mailOptions = {
+        from: process.env.EMAIL_USER,
+        to: email,
+        subject: 'Verify Your Email - Loan Management System',
+        html: `
+          <h3>Email Verification</h3>
+          <p>Your one-time verification code is: <b>${verificationCode}</b></p>
+          <p>This code is valid for 15 minutes. Please enter it to complete registration.</p>
+        `,
+      };
+      
+      await transporter.sendMail(mailOptions);
+      
+      return res.status(201).json({
+        success: true,
+        message: 'Verification code resent to your email. Please check your email and verify your account.',
+        user: { id: existingUser._id, email: existingUser.email, fullName: `${existingUser.userFirstName} ${existingUser.userLastName}` },
+      });
     }
 
     // Generate verification code
@@ -110,12 +171,14 @@ exports.resendOtp = async (req, res) => {
   }
 
   try {
+    // Cleanup old unverified accounts before processing resend
+    await cleanupOldUnverifiedAccounts();
     const user = await User.findOne({ email });
     if (!user) {
-      return res.status(404).json({ success: false, message: 'User not found' });
+      return res.status(404).json({ success: false, message: 'No account found with this email address. Please register first.' });
     }
     if (user.isVerified) {
-      return res.status(400).json({ success: false, message: 'Email already verified' });
+      return res.status(400).json({ success: false, message: 'This email is already verified. You can log in directly.' });
     }
 
     // Generate new OTP
@@ -166,7 +229,11 @@ exports.login = async (req, res) => {
 
     // Check if verified
     if (!user.isVerified) {
-      return res.status(403).json({ success: false, message: 'Please verify your email first' });
+      return res.status(403).json({ 
+        success: false, 
+        message: 'Please verify your email first. Check your inbox for the verification code or request a new one.',
+        needsVerification: true 
+      });
     }
 
     // Check password
