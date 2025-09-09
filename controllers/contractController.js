@@ -315,6 +315,26 @@ exports.createContract = async (req, res) => {
       contract.status = 'pending_document_upload';
       await contract.save();
       
+      // Update loan roles for all participants
+      console.log('Updating loan roles after contract creation...');
+      try {
+        const [borrower, sponsor1, sponsor2] = await Promise.all([
+          User.findById(contract.userID),
+          User.findById(contract.sponsorID_1),
+          User.findById(contract.sponsorID_2)
+        ]);
+        
+        await Promise.all([
+          borrower?.updateLoanRole(),
+          sponsor1?.updateLoanRole(),
+          sponsor2?.updateLoanRole()
+        ]);
+        console.log('Loan roles updated after contract creation');
+      } catch (roleUpdateError) {
+        console.error('Error updating loan roles after contract creation:', roleUpdateError);
+        // Don't fail the contract creation if role update fails
+      }
+      
       // STEP 2: Notify borrower about contract submission
       await notificationService.sendContractSubmissionNotification(userId, contract._id);
       
@@ -335,6 +355,26 @@ exports.createContract = async (req, res) => {
     } else {
       contract.status = 'pending_sponsor_approval';
       await contract.save();
+      
+      // Update loan roles for all participants
+      console.log('Updating loan roles after contract creation...');
+      try {
+        const [borrower, sponsor1, sponsor2] = await Promise.all([
+          User.findById(contract.userID),
+          User.findById(contract.sponsorID_1),
+          User.findById(contract.sponsorID_2)
+        ]);
+        
+        await Promise.all([
+          borrower?.updateLoanRole(),
+          sponsor1?.updateLoanRole(),
+          sponsor2?.updateLoanRole()
+        ]);
+        console.log('Loan roles updated after contract creation');
+      } catch (roleUpdateError) {
+        console.error('Error updating loan roles after contract creation:', roleUpdateError);
+        // Don't fail the contract creation if role update fails
+      }
       
       // STEP 2: Notify borrower about contract submission
       await notificationService.sendContractSubmissionNotification(userId, contract._id);
@@ -867,6 +907,26 @@ async function rejectContract(contract, reason, details = '') {
   contract.rejectionReason = reason;
   await contract.save();
   
+  // Update loan roles for all participants after contract rejection
+  console.log('Updating loan roles after contract rejection...');
+  try {
+    const [borrower, sponsor1, sponsor2] = await Promise.all([
+      User.findById(contract.userID),
+      User.findById(contract.sponsorID_1),
+      User.findById(contract.sponsorID_2)
+    ]);
+    
+    await Promise.all([
+      borrower?.updateLoanRole(),
+      sponsor1?.updateLoanRole(),
+      sponsor2?.updateLoanRole()
+    ]);
+    console.log('Loan roles updated after contract rejection');
+  } catch (roleUpdateError) {
+    console.error('Error updating loan roles after contract rejection:', roleUpdateError);
+    // Don't fail the rejection if role update fails
+  }
+  
   // STEP 5: Notify borrower about contract rejection
   await notificationService.sendContractRejectionNotification(contract.userID, contract._id, reason);
   
@@ -1366,6 +1426,26 @@ exports.editContract = async (req, res) => {
 
     await contract.save();
 
+    // Update loan roles for all participants after contract edit
+    console.log('Updating loan roles after contract edit...');
+    try {
+      const [borrower, sponsor1, sponsor2] = await Promise.all([
+        User.findById(contract.userID),
+        User.findById(contract.sponsorID_1),
+        User.findById(contract.sponsorID_2)
+      ]);
+      
+      await Promise.all([
+        borrower?.updateLoanRole(),
+        sponsor1?.updateLoanRole(),
+        sponsor2?.updateLoanRole()
+      ]);
+      console.log('Loan roles updated after contract edit');
+    } catch (roleUpdateError) {
+      console.error('Error updating loan roles after contract edit:', roleUpdateError);
+      // Don't fail the edit if role update fails
+    }
+
     // 12. Handle sponsor changes - cleanup old sponsors and notify new ones
     if (sponsorsChanged) {
       // Remove from old sponsors' pending approvals
@@ -1510,6 +1590,26 @@ exports.deleteContract = async (req, res) => {
     
     // Delete any uploaded documents for this contract
     await additionalDocumentModel.deleteMany({ contractID: contract._id });
+    
+    // Update loan roles for all participants before deleting contract
+    console.log('Updating loan roles after contract deletion...');
+    try {
+      const [borrower, sponsor1, sponsor2] = await Promise.all([
+        User.findById(contract.userID),
+        User.findById(contract.sponsorID_1),
+        User.findById(contract.sponsorID_2)
+      ]);
+      
+      await Promise.all([
+        borrower?.updateLoanRole(),
+        sponsor1?.updateLoanRole(),
+        sponsor2?.updateLoanRole()
+      ]);
+      console.log('Loan roles updated after contract deletion');
+    } catch (roleUpdateError) {
+      console.error('Error updating loan roles after contract deletion:', roleUpdateError);
+      // Don't fail the deletion if role update fails
+    }
     
     // Delete the contract
     await Contract.findByIdAndDelete(contractId);

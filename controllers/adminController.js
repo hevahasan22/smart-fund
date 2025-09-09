@@ -11,10 +11,51 @@ const notificationService = require('../services/notificationService');
 exports.getAllUsers = async (req, res) => {
   try {
     const users = await User.find({ status: { $ne: 'inactive' }, role: 'user' })
-      .select('-password -__v -notifications')
-      .lean();
-    res.json({ success: true, users });
+      .select('-password -__v -notifications');
+    
+    // Update loan roles for all users and return updated data
+    const usersWithUpdatedRoles = await Promise.all(users.map(async (user) => {
+      try {
+        const roleUpdateResult = await user.updateLoanRole();
+        return {
+          _id: user._id,
+          userFirstName: user.userFirstName,
+          userLastName: user.userLastName,
+          email: user.email,
+          role: user.role,
+          status: user.status,
+          isActive: user.isActive,
+          loanRole: roleUpdateResult.loanRole,
+          borrowerContracts: roleUpdateResult.borrowerContracts,
+          sponsorContracts: roleUpdateResult.sponsorContracts,
+          createdAt: user.createdAt,
+          updatedAt: user.updatedAt
+        };
+      } catch (roleUpdateError) {
+        console.error(`Error updating loan role for user ${user._id}:`, roleUpdateError);
+        // Return user data even if role update fails
+        return {
+          _id: user._id,
+          userFirstName: user.userFirstName,
+          userLastName: user.userLastName,
+          email: user.email,
+          role: user.role,
+          status: user.status,
+          isActive: user.isActive,
+          loanRole: user.loanRole || ['borrower'], // fallback to default
+          borrowerContracts: 0,
+          sponsorContracts: 0,
+          createdAt: user.createdAt,
+          updatedAt: user.updatedAt,
+          roleUpdateError: roleUpdateError.message
+        };
+      }
+    }));
+    
+    console.log(`Fetched and updated loan roles for ${usersWithUpdatedRoles.length} users`);
+    res.json({ success: true, users: usersWithUpdatedRoles });
   } catch (error) {
+    console.error('Error fetching users:', error);
     res.status(500).json({ success: false, error: 'Error fetching users', details: error.message });
   }
 };
@@ -25,34 +66,67 @@ exports.getUserDetails = async (req, res) => {
     const userId = req.params.userId;
     
     const user = await User.findById(userId)
-      .select('-password -__v')
-      .lean();
+      .select('-password -__v');
     
     if (!user) {
       return res.status(404).json({ success: false, error: 'User not found' });
     }
 
+    // Update user's loan role
+    let roleUpdateResult;
+    try {
+      roleUpdateResult = await user.updateLoanRole();
+    } catch (roleUpdateError) {
+      console.error(`Error updating loan role for user ${userId}:`, roleUpdateError);
+      roleUpdateResult = {
+        loanRole: user.loanRole || ['borrower'],
+        borrowerContracts: 0,
+        sponsorContracts: 0
+      };
+    }
+
     // Get contracts where user is borrower OR sponsor
     const contracts = await Contract.find({
       $or: [
-        { borrower: userId },
-        { sponsors: userId }
+        { userID: userId },
+        { sponsorID_1: userId },
+        { sponsorID_2: userId }
       ]
     })
-    .populate('loanType')
-    .populate('sponsors', 'userFirstName userLastName email')
-    .populate('borrower', 'userFirstName userLastName email')
+    .populate('userID', 'userFirstName userLastName email')
+    .populate('sponsorID_1', 'userFirstName userLastName email')
+    .populate('sponsorID_2', 'userFirstName userLastName email')
+    .populate({
+      path: 'typeTermID',
+      populate: [
+        { path: 'loanTypeID', select: 'loanName' },
+        { path: 'loanTermID', select: 'type' }
+      ]
+    })
     .lean();
 
     // Get payments for all contracts
     const paymentPromises = contracts.map(contract => 
-      Payment.find({ contract: contract._id }).lean()
+      Payment.find({ contractID: contract._id }).lean()
     );
     const payments = await Promise.all(paymentPromises);
 
     res.json({
       success: true,
-      user,
+      user: {
+        _id: user._id,
+        userFirstName: user.userFirstName,
+        userLastName: user.userLastName,
+        email: user.email,
+        role: user.role,
+        status: user.status,
+        isActive: user.isActive,
+        loanRole: roleUpdateResult.loanRole,
+        borrowerContracts: roleUpdateResult.borrowerContracts,
+        sponsorContracts: roleUpdateResult.sponsorContracts,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt
+      },
       contracts,
       payments
     });
@@ -1692,12 +1766,11 @@ exports.getAllUsersWithActiveLoans = async (req, res) => {
       .select('userFirstName userLastName email role createdAt status')
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
-      .skip((parseInt(page) - 1) * parseInt(limit))
-      .lean();
+      .skip((parseInt(page) - 1) * parseInt(limit));
     
     const totalUsers = await User.countDocuments(userQuery);
     
-    // Get active loans count for each user
+    // Get active loans count and update loan roles for each user
     const usersWithLoanCounts = await Promise.all(users.map(async (user) => {
       const [borrowerLoans, sponsorLoans] = await Promise.all([
         Contract.countDocuments({ userID: user._id, status: 'active' }),
@@ -1709,8 +1782,30 @@ exports.getAllUsersWithActiveLoans = async (req, res) => {
       
       const totalActiveLoans = borrowerLoans + sponsorLoans;
       
+      // Update user's loan role
+      let roleUpdateResult;
+      try {
+        roleUpdateResult = await user.updateLoanRole();
+      } catch (roleUpdateError) {
+        console.error(`Error updating loan role for user ${user._id}:`, roleUpdateError);
+        roleUpdateResult = {
+          loanRole: user.loanRole || ['borrower'],
+          borrowerContracts: 0,
+          sponsorContracts: 0
+        };
+      }
+      
       return {
-        ...user,
+        _id: user._id,
+        userFirstName: user.userFirstName,
+        userLastName: user.userLastName,
+        email: user.email,
+        role: user.role,
+        status: user.status,
+        createdAt: user.createdAt,
+        loanRole: roleUpdateResult.loanRole,
+        borrowerContracts: roleUpdateResult.borrowerContracts,
+        sponsorContracts: roleUpdateResult.sponsorContracts,
         activeLoans: {
           asBorrower: borrowerLoans,
           asSponsor: sponsorLoans,
@@ -1949,12 +2044,11 @@ exports.getAllUsersWithCompletedLoans = async (req, res) => {
       .select('userFirstName userLastName email role createdAt status')
       .sort({ createdAt: -1 })
       .limit(parseInt(limit))
-      .skip((parseInt(page) - 1) * parseInt(limit))
-      .lean();
+      .skip((parseInt(page) - 1) * parseInt(limit));
     
     const totalUsers = await User.countDocuments(userQuery);
     
-    // Get completed loans count for each user
+    // Get completed loans count and update loan roles for each user
     const usersWithLoanCounts = await Promise.all(users.map(async (user) => {
       const [borrowerLoans, sponsorLoans] = await Promise.all([
         Contract.countDocuments({ userID: user._id, status: 'completed' }),
@@ -1966,8 +2060,30 @@ exports.getAllUsersWithCompletedLoans = async (req, res) => {
       
       const totalCompletedLoans = borrowerLoans + sponsorLoans;
       
+      // Update user's loan role
+      let roleUpdateResult;
+      try {
+        roleUpdateResult = await user.updateLoanRole();
+      } catch (roleUpdateError) {
+        console.error(`Error updating loan role for user ${user._id}:`, roleUpdateError);
+        roleUpdateResult = {
+          loanRole: user.loanRole || ['borrower'],
+          borrowerContracts: 0,
+          sponsorContracts: 0
+        };
+      }
+      
       return {
-        ...user,
+        _id: user._id,
+        userFirstName: user.userFirstName,
+        userLastName: user.userLastName,
+        email: user.email,
+        role: user.role,
+        status: user.status,
+        createdAt: user.createdAt,
+        loanRole: roleUpdateResult.loanRole,
+        borrowerContracts: roleUpdateResult.borrowerContracts,
+        sponsorContracts: roleUpdateResult.sponsorContracts,
         completedLoans: {
           asBorrower: borrowerLoans,
           asSponsor: sponsorLoans,
