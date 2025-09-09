@@ -169,6 +169,46 @@ userSchema.methods.updateSponsorStatus = async function() {
   await this.save();
 };
 
+// Update user's loan role based on active contracts
+userSchema.methods.updateLoanRole = async function() {
+  const { Contract } = require('./contract');
+  
+  // Check if user is a borrower in any active contracts
+  const borrowerContracts = await Contract.countDocuments({
+    userID: this._id,
+    status: { $in: ['approved', 'active', 'pending_sponsor_approval', 'pending_document_approval', 'pending_processing', 'pending_document_upload', 'pending_document_reupload'] }
+  });
+  
+  // Check if user is a sponsor in any active contracts
+  const sponsorContracts = await Contract.countDocuments({
+    $or: [{ sponsorID_1: this._id }, { sponsorID_2: this._id }],
+    status: { $in: ['approved', 'active', 'pending_sponsor_approval', 'pending_document_approval', 'pending_processing', 'pending_document_upload', 'pending_document_reupload'] }
+  });
+  
+  // Update loanRole array based on active roles
+  const newLoanRole = [];
+  if (borrowerContracts > 0) {
+    newLoanRole.push('borrower');
+  }
+  if (sponsorContracts > 0) {
+    newLoanRole.push('sponsor');
+  }
+  
+  // If no active contracts, default to borrower
+  if (newLoanRole.length === 0) {
+    newLoanRole.push('borrower');
+  }
+  
+  this.loanRole = newLoanRole;
+  await this.save();
+  
+  return {
+    loanRole: this.loanRole,
+    borrowerContracts,
+    sponsorContracts
+  };
+};
+
 // Validation functions
 function validateRegisterUser(obj) {
   const schema = Joi.object({

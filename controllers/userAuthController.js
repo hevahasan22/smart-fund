@@ -228,7 +228,7 @@ exports.login = async (req, res) => {
     }
 
     // Block login for inactive users until reactivated by admin
-    if (user.status === 'inactive') {
+    if (user.status === 'inactive' || user.isActive === false) {
       return res.status(403).json({ 
         success: false, 
         message: 'Your account is inactive. Please contact support or wait for admin reactivation.' 

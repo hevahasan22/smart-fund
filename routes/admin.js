@@ -8,6 +8,8 @@ router.get('/users', authenticate, requireAdmin, adminController.getAllUsers);
 router.get('/users/:userId', authenticate, requireAdmin, adminController.getUserDetails);
 router.delete('/users/:userId', authenticate, requireAdmin, adminController.deleteUser);
 router.put('/users/:userId/reactivate', authenticate, requireAdmin, adminController.reactivateUser);
+router.put('/users/:userId/loan-role', authenticate, requireAdmin, adminController.updateUserLoanRole);
+router.put('/users/loan-roles/update-all', authenticate, requireAdmin, adminController.updateAllUsersLoanRoles);
 
 // Active Loans Management
 router.get('/users/:userId/active-loans', authenticate, requireAdmin, adminController.getUserActiveLoans);

@@ -134,6 +134,31 @@ exports.processPayment = async (req, res) => {
       loan.status = 'completed';
       await loan.save();
       
+      // Update contract status to completed
+      contract.status = 'completed';
+      await contract.save();
+      
+      // Update loan roles for all participants after loan completion
+      console.log('Updating loan roles after loan completion...');
+      try {
+        const { User } = require('../models/user');
+        const [borrower, sponsor1, sponsor2] = await Promise.all([
+          User.findById(contract.userID),
+          User.findById(contract.sponsorID_1),
+          User.findById(contract.sponsorID_2)
+        ]);
+        
+        await Promise.all([
+          borrower?.updateLoanRole(),
+          sponsor1?.updateLoanRole(),
+          sponsor2?.updateLoanRole()
+        ]);
+        console.log('Loan roles updated after completion');
+      } catch (roleUpdateError) {
+        console.error('Error updating loan roles after completion:', roleUpdateError);
+        // Don't fail the payment processing if role update fails
+      }
+      
       // STEP 7: Notify all parties about loan completion
       await Promise.all([
         notificationService.sendLoanCompletionNotification(borrowerId, loan._id),
@@ -216,6 +241,33 @@ exports.visitAndPay = async (req, res) => {
       if (loan) {
         loan.status = 'completed';
         await loan.save();
+        
+        // Update contract status and loan roles
+        const { Contract } = require('../models/contract');
+        const { User } = require('../models/user');
+        const contract = await Contract.findOne({ loanID: loan._id });
+        
+        if (contract) {
+          contract.status = 'completed';
+          await contract.save();
+          
+          // Update loan roles for all participants
+          try {
+            const [borrower, sponsor1, sponsor2] = await Promise.all([
+              User.findById(contract.userID),
+              User.findById(contract.sponsorID_1),
+              User.findById(contract.sponsorID_2)
+            ]);
+            
+            await Promise.all([
+              borrower?.updateLoanRole(),
+              sponsor1?.updateLoanRole(),
+              sponsor2?.updateLoanRole()
+            ]);
+          } catch (roleUpdateError) {
+            console.error('Error updating loan roles in QR visit:', roleUpdateError);
+          }
+        }
       }
     }
 

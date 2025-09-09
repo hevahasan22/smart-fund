@@ -838,6 +838,26 @@ const processSingleContract = async (contract) => {
     notificationService.sendAdminActivationNotification(contract._id, contract.userID)
   ]);
 
+  // 7. Update loan roles for all participants
+  console.log('Updating loan roles for contract participants...');
+  try {
+    const [borrower, sponsor1, sponsor2] = await Promise.all([
+      User.findById(contract.userID),
+      User.findById(contract.sponsorID_1),
+      User.findById(contract.sponsorID_2)
+    ]);
+    
+    await Promise.all([
+      borrower?.updateLoanRole(),
+      sponsor1?.updateLoanRole(),
+      sponsor2?.updateLoanRole()
+    ]);
+    console.log('Loan roles updated successfully');
+  } catch (roleUpdateError) {
+    console.error('Error updating loan roles:', roleUpdateError);
+    // Don't fail the contract approval if role update fails
+  }
+
   console.log(`Contract ${contract._id} successfully approved and loan created`);
 };
 

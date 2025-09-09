@@ -114,7 +114,7 @@ exports.reactivateUser = async (req, res) => {
     
     const user = await User.findByIdAndUpdate(
       userId,
-      { $set: { status: 'eligible' } },
+      { $set: { status: 'eligible', isActive: true } },
       { new: true }
     ).select('-password -__v');
     
@@ -128,6 +128,89 @@ exports.reactivateUser = async (req, res) => {
       user
     });
   } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// Update loan role for a specific user
+exports.updateUserLoanRole = async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    
+    const user = await User.findById(userId);
+    if (!user) {
+      return res.status(404).json({ success: false, error: 'User not found' });
+    }
+    
+    const result = await user.updateLoanRole();
+    
+    res.json({
+      success: true,
+      message: 'User loan role updated successfully',
+      user: {
+        id: user._id,
+        email: user.email,
+        firstName: user.userFirstName,
+        lastName: user.userLastName,
+        loanRole: result.loanRole,
+        borrowerContracts: result.borrowerContracts,
+        sponsorContracts: result.sponsorContracts
+      }
+    });
+  } catch (error) {
+    console.error('Error updating user loan role:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// Update loan roles for all users
+exports.updateAllUsersLoanRoles = async (req, res) => {
+  try {
+    console.log('Starting bulk update of all users loan roles...');
+    
+    const users = await User.find({ status: { $ne: 'inactive' } });
+    const results = [];
+    let successCount = 0;
+    let errorCount = 0;
+    
+    for (const user of users) {
+      try {
+        const result = await user.updateLoanRole();
+        results.push({
+          userId: user._id,
+          email: user.email,
+          success: true,
+          loanRole: result.loanRole,
+          borrowerContracts: result.borrowerContracts,
+          sponsorContracts: result.sponsorContracts
+        });
+        successCount++;
+      } catch (error) {
+        console.error(`Error updating loan role for user ${user._id}:`, error);
+        results.push({
+          userId: user._id,
+          email: user.email,
+          success: false,
+          error: error.message
+        });
+        errorCount++;
+      }
+    }
+    
+    console.log(`Bulk update completed: ${successCount} successful, ${errorCount} errors`);
+    
+    res.json({
+      success: true,
+      message: `Loan roles updated for ${successCount} users`,
+      summary: {
+        totalUsers: users.length,
+        successCount,
+        errorCount
+      },
+      results: results.slice(0, 50) // Limit results to first 50 for response size
+    });
+  } catch (error) {
+    console.error('Error in bulk update of loan roles:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 };
