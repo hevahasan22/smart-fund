@@ -227,6 +227,14 @@ exports.login = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid credentials' });
     }
 
+    // Block login for inactive users until reactivated by admin
+    if (user.status === 'inactive') {
+      return res.status(403).json({ 
+        success: false, 
+        message: 'Your account is inactive. Please contact support or wait for admin reactivation.' 
+      });
+    }
+
     // Check if verified
     if (!user.isVerified) {
       return res.status(403).json({ 
