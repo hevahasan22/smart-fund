@@ -31,9 +31,9 @@ const createLoan = async (contract) => {
     await Contract.findByIdAndUpdate(contract._id, { loanID: loan._id });
     
     // Defensive check before creating payment schedule
-    console.log('Creating payment schedule:', {
+    console.log('Creating payment schedule (flat rate method):', {
       loanAmount: loan.loanAmount,
-      interestRate: loan.interestRate,
+      flatRate: loan.interestRate,
       termMonths: loan.loanTermMonths
     });
     if (
@@ -244,6 +244,7 @@ exports.getLoanById = async (req, res) => {
 };
 
 const createPaymentSchedule = async (loan, termMonths) => {
+  // Calculate monthly payment using flat rate method
   const monthlyPayment = calculateMonthlyPayment(
     loan.loanAmount, 
     loan.interestRate, 
@@ -267,13 +268,14 @@ const createPaymentSchedule = async (loan, termMonths) => {
   await Payment.insertMany(payments);
 };
 
-// Payment calculation
-const calculateMonthlyPayment = (principal, annualRate, termMonths) => {
-  const monthlyRate = annualRate / 100 / 12;
-  const payment = principal * 
-    (monthlyRate * Math.pow(1 + monthlyRate, termMonths)) / 
-    (Math.pow(1 + monthlyRate, termMonths) - 1);
-  return Math.round(payment); // Round to nearest integer
+// Payment calculation - using flat rate method
+const calculateMonthlyPayment = (principal, flatRate, termMonths) => {
+  // Flat rate calculation: total interest is calculated as a percentage of principal
+  // and then divided equally across all payments
+  const totalInterest = principal * (flatRate / 100);
+  const totalPayment = principal + totalInterest;
+  const monthlyPayment = totalPayment / termMonths;
+  return Math.round(monthlyPayment); // Round to nearest integer
 };
 
 // Get the latest loan for the logged-in user
