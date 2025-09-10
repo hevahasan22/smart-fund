@@ -5,13 +5,17 @@ exports.list = async (req, res) => {
   try {
     const limit = parseInt(req.query.limit || '50', 10);
     const user = await User.findById(req.user._id).select('notifications');
+    console.log('User notifications:', user?.notifications?.length || 0);
     const excludedTypes = new Set(['sponsorship_request', 'sponsor_request']);
-    const notifications = (user?.notifications || [])
-      .filter(n => !excludedTypes.has(n.type))
+    const allNotifications = user?.notifications || [];
+    const unreadNotifications = allNotifications.filter(n => !excludedTypes.has(n.type) && !n.isRead);
+    console.log('Unread notifications count:', unreadNotifications.length);
+    const notifications = unreadNotifications
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
       .slice(0, limit);
     res.json({ notifications });
   } catch (error) {
+    console.error('Error fetching notifications:', error);
     res.status(500).json({ error: 'Failed to fetch notifications' });
   }
 };
@@ -129,5 +133,22 @@ exports.countSponsorRequests = async (req, res) => {
     res.json({ count });
   } catch (error) {
     res.status(500).json({ error: 'Failed to fetch sponsor requests count' });
+  }
+};
+
+// Test endpoint to create a notification
+exports.testNotification = async (req, res) => {
+  try {
+    const { createInAppNotification } = require('../services/notifications/helpers');
+    await createInAppNotification(
+      req.user._id, 
+      'test_notification', 
+      'This is a test notification', 
+      null
+    );
+    res.json({ message: 'Test notification created' });
+  } catch (error) {
+    console.error('Test notification error:', error);
+    res.status(500).json({ error: 'Failed to create test notification' });
   }
 }; 

@@ -22,4 +22,7 @@ router.patch('/:id/read', asyncHandler(ctrl.markAsRead));
 router.patch('/mark-all-read', asyncHandler(ctrl.markAllAsRead));
 router.delete('/', asyncHandler(ctrl.clearAll));
 
+// Test endpoint
+router.post('/test', asyncHandler(ctrl.testNotification));
+
 module.exports = router; 

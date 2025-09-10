@@ -71,6 +71,23 @@ const checkLatePayments = async () => {
   }
 };
 
+// Helper function to check if all previous payments are paid
+const checkPreviousPaymentsPaid = async (payment) => {
+  try {
+    // Find all payments for the same loan with earlier due dates
+    const previousPayments = await Payment.find({
+      loanID: payment.loanID,
+      dueDate: { $lt: payment.dueDate },
+      status: { $ne: 'paid' }
+    });
+
+    return previousPayments.length === 0;
+  } catch (error) {
+    console.error('Error checking previous payments:', error);
+    return false;
+  }
+};
+
 // Process payment via QR confirmation
 exports.processPayment = async (req, res) => {
   try {
@@ -99,6 +116,14 @@ exports.processPayment = async (req, res) => {
     // Optionally, prevent paying non-pending payments
     if (payment.status !== 'pending') {
       return res.status(400).json({ error: 'This payment cannot be paid in its current status.' });
+    }
+
+    // Check if all previous payments are paid
+    const canPay = await checkPreviousPaymentsPaid(payment);
+    if (!canPay) {
+      return res.status(400).json({ 
+        error: 'You must pay all previous payments before paying this one.' 
+      });
     }
 
     const loan = payment.loanID;
@@ -224,6 +249,12 @@ exports.visitAndPay = async (req, res) => {
 
     if (payment.status === 'paid') {
       return res.send('<html><body><h2>Payment already processed</h2></body></html>');
+    }
+
+    // Check if all previous payments are paid
+    const canPay = await checkPreviousPaymentsPaid(payment);
+    if (!canPay) {
+      return res.send('<html><body><h2>Cannot process payment</h2><p>You must pay all previous payments before paying this one.</p></body></html>');
     }
 
     // Mark as paid
