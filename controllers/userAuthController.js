@@ -250,28 +250,30 @@ exports.login = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Invalid email or password' });
     }
 
-    // Check for active contracts as borrower or sponsor
+    // Check for active loans linked to the user's contracts (as borrower or sponsor)
     const { Contract } = require('../models/contract');
-    
-    // Find contracts where user is the borrower (userID)
-    const borrowerContracts = await Contract.find({
-      userID: user._id,
-      status: { $in: ['active', 'pending_sponsor_approval', 'pending_document_approval', 'pending_document_upload', 'pending_document_reupload', 'pending_processing', 'approved'] }
-    });
+    const { Loan } = require('../models/loan');
 
-    // Find contracts where user is a sponsor (sponsorID_1 or sponsorID_2)
+    // Contracts where user is borrower and have a loan linked
+    const borrowerContracts = await Contract.find({ userID: user._id, loanID: { $ne: null } }, { loanID: 1 });
+    const borrowerLoanIds = borrowerContracts.map(c => c.loanID).filter(Boolean);
+    const borrowerActiveLoans = borrowerLoanIds.length
+      ? await Loan.find({ _id: { $in: borrowerLoanIds }, status: 'active' })
+      : [];
+
+    // Contracts where user is sponsor and have a loan linked
     const sponsorContracts = await Contract.find({
-      $or: [
-        { sponsorID_1: user._id },
-        { sponsorID_2: user._id }
-      ],
-      status: { $in: ['active', 'pending_sponsor_approval', 'pending_document_approval', 'pending_document_upload', 'pending_document_reupload', 'pending_processing', 'approved'] }
-    });
+      $or: [{ sponsorID_1: user._id }, { sponsorID_2: user._id }],
+      loanID: { $ne: null }
+    }, { loanID: 1 });
+    const sponsorLoanIds = sponsorContracts.map(c => c.loanID).filter(Boolean);
+    const sponsorActiveLoans = sponsorLoanIds.length
+      ? await Loan.find({ _id: { $in: sponsorLoanIds }, status: 'active' })
+      : [];
 
-    // Determine contract status
-    const hasActiveContractAsBorrower = borrowerContracts.length > 0;
-    const hasActiveContractAsSponsor = sponsorContracts.length > 0;
-    const hasAnyActiveContract = hasActiveContractAsBorrower || hasActiveContractAsSponsor;
+    const hasActiveLoanAsBorrower = borrowerActiveLoans.length > 0;
+    const hasActiveLoanAsSponsor = sponsorActiveLoans.length > 0;
+    const hasAnyActiveLoan = hasActiveLoanAsBorrower || hasActiveLoanAsSponsor;
 
     // Generate JWT
    const token = jwt.sign({ id: user._id, role: user.role }, process.env.JWT_SECRET);
@@ -287,12 +289,12 @@ exports.login = async (req, res) => {
         fullName: `${user.userFirstName} ${user.userLastName}`,
         role: user.role,
         profilePhoto: user.profilePhoto,
-        contractStatus: {
-          hasActiveContract: hasAnyActiveContract,
-          hasActiveContractAsBorrower: hasActiveContractAsBorrower,
-          hasActiveContractAsSponsor: hasActiveContractAsSponsor,
-          borrowerContractCount: borrowerContracts.length,
-          sponsorContractCount: sponsorContracts.length
+        loanStatus: {
+          hasActiveLoan: hasAnyActiveLoan,
+          hasActiveLoanAsBorrower: hasActiveLoanAsBorrower,
+          hasActiveLoanAsSponsor: hasActiveLoanAsSponsor,
+          borrowerActiveLoanCount: borrowerActiveLoans.length,
+          sponsorActiveLoanCount: sponsorActiveLoans.length
         }
       },
     });
