@@ -22,6 +22,7 @@ function contractToUserView(contract) {
     return path.split('.').reduce((o, k) => (o && o[k] !== undefined ? o[k] : fallback), obj);
   };
   return {
+    contractID: contract._id, // Include contract ID
     status: contract.status,
     employmentStatus: contract.employmentStatus,
     sponsor1: contract.sponsorID_1 ? {
@@ -1001,8 +1002,53 @@ exports.getUserPendingContracts = async (req, res) => {
     
     console.log(`Found ${pendingContracts.length} pending contracts for user ${userId}`);
     
-    // Transform contracts to user-friendly format
-    const transformedContracts = pendingContracts.map(contract => contractToUserView(contract));
+    // Transform contracts to user-friendly format and add rejected documents if needed
+    const transformedContracts = await Promise.all(pendingContracts.map(async (contract) => {
+      const contractView = contractToUserView(contract);
+      
+      // If status is pending_document_reupload, get rejected document types
+      if (contract.status === 'pending_document_reupload') {
+        try {
+          // Get all uploaded documents for this contract
+          const uploadedDocuments = await additionalDocumentModel.find({ 
+            contractID: contract._id 
+          }).populate('typeID');
+          
+          // Get required document types for this contract
+          const requiredDocTypeRelations = await documentTypeTermRelationModel.find({
+            typeTermID: contract.typeTermID,
+            isRequired: true
+          }).populate('documentTypeID');
+          
+          // Find rejected document types that need reupload
+          const rejectedDocumentTypes = requiredDocTypeRelations
+            .filter(relation => {
+              const uploadedDoc = uploadedDocuments.find(doc => 
+                doc.typeID._id.equals(relation.documentTypeID._id)
+              );
+              return uploadedDoc && uploadedDoc.status === 'rejected';
+            })
+            .map(relation => ({
+              id: relation.documentTypeID._id,
+              name: relation.documentTypeID.documentName,
+              description: relation.documentTypeID.description,
+              rejectionReason: uploadedDocuments.find(doc => 
+                doc.typeID._id.equals(relation.documentTypeID._id)
+              )?.rejectionReason || 'Document was rejected'
+            }));
+          
+          contractView.rejectedDocuments = rejectedDocumentTypes;
+          console.log(`Found ${rejectedDocumentTypes.length} rejected documents for contract ${contract._id}`);
+        } catch (docError) {
+          console.error('Error fetching rejected documents:', docError);
+          contractView.rejectedDocuments = [];
+        }
+      } else {
+        contractView.rejectedDocuments = [];
+      }
+      
+      return contractView;
+    }));
     
     res.json({
       pendingContracts: transformedContracts,
